@@ -312,11 +312,11 @@ printfix/
 ## 10. Implementation Order
 
 ### Phase 1 — Foundation
-- [ ] FastAPI app skeleton with job CRUD endpoints
-- [ ] File upload + storage
-- [ ] Redis job queue + state machine
-- [ ] LibreOffice headless integration (format conversion + PDF rendering)
-- [ ] Page-to-image rendering pipeline
+- [x] FastAPI app skeleton with job CRUD endpoints
+- [x] File upload + storage
+- [x] Redis job queue + state machine
+- [x] LibreOffice headless integration (format conversion + PDF rendering)
+- [x] Page-to-image rendering pipeline
 
 ### Phase 2 — Diagnosis
 - [ ] Gemini integration for visual page analysis
