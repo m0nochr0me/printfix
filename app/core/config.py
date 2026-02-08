@@ -50,6 +50,15 @@ class Settings(BaseSettings):
 
     GOOGLE_API_KEY: str
 
+    # Anthropic (only needed for Thorough effort level)
+    ANTHROPIC_API_KEY: str | None = None
+    ANTHROPIC_DIAGNOSIS_MODEL: str = "claude-sonnet-4-20250514"
+
+    # Diagnosis thresholds
+    DIAGNOSIS_MIN_MARGIN_INCHES: float = 0.5
+    DIAGNOSIS_MIN_FONT_PT: float = 8.0
+    DIAGNOSIS_MIN_IMAGE_DPI: int = 150
+
 
     class Config:
         env_file = ".env"

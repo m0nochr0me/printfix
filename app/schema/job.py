@@ -15,6 +15,7 @@ class JobStatus(StrEnum):
     rendering = "rendering"
     ingested = "ingested"
     diagnosing = "diagnosing"
+    diagnosed = "diagnosed"
     fixing = "fixing"
     verifying = "verifying"
     done = "done"
@@ -67,6 +68,7 @@ class JobResponse(BaseModel):
     issues_fixed: int = 0
     issues_skipped: int = 0
     confidence: float | None = None
+    print_readiness: str | None = None
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None = None

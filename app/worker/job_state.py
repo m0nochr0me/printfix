@@ -21,7 +21,8 @@ VALID_TRANSITIONS: dict[str, set[str]] = {
     "converting": {"rendering", "failed"},
     "rendering": {"ingested", "failed"},
     "ingested": {"diagnosing", "failed"},
-    "diagnosing": {"fixing", "failed"},
+    "diagnosing": {"diagnosed", "failed"},
+    "diagnosed": {"diagnosing", "fixing", "failed"},
     "fixing": {"verifying", "failed"},
     "verifying": {"done", "needs_review", "failed"},
 }

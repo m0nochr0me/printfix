@@ -319,11 +319,11 @@ printfix/
 - [x] Page-to-image rendering pipeline
 
 ### Phase 2 — Diagnosis
-- [ ] Gemini integration for visual page analysis
-- [ ] Structural analysis for DOCX (margins, fonts, tables, page breaks)
-- [ ] Structural analysis for PDF
-- [ ] Unified diagnosis model (merge visual + structural)
-- [ ] Effort level routing (model selection)
+- [x] Gemini integration for visual page analysis
+- [x] Structural analysis for DOCX (margins, fonts, tables, page breaks)
+- [x] Structural analysis for PDF
+- [x] Unified diagnosis model (merge visual + structural)
+- [x] Effort level routing (model selection)
 
 ### Phase 3 — Core Fixes
 - [ ] MCP tool server setup

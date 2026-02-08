@@ -22,8 +22,9 @@ from app.schema.job import (
     JobStatus,
     PageSize,
 )
+from app.schema.diagnosis import DiagnosisResponse
 from app.worker.job_state import JobStateManager
-from app.worker.tasks import ingest_document
+from app.worker.tasks import diagnose_document, ingest_document
 
 __all__ = ("router",)
 
@@ -113,6 +114,7 @@ async def get_job(job_id: str) -> JobResponse:
         issues_fixed=int(job.get("issues_fixed", 0)),
         issues_skipped=int(job.get("issues_skipped", 0)),
         confidence=float(job["confidence"]) if job.get("confidence") else None,
+        print_readiness=job.get("print_readiness"),
         created_at=job["created_at"],
         updated_at=job["updated_at"],
         completed_at=job.get("completed_at"),
@@ -178,9 +180,61 @@ async def delete_job(job_id: str) -> None:
 
 
 @router.get("/jobs/{job_id}/diagnosis")
-async def get_diagnosis(job_id: str) -> dict:
-    """Get the full diagnosis detail for a job. (Phase 2)"""
-    raise HTTPException(status_code=501, detail="Not implemented yet — coming in Phase 2")
+async def get_diagnosis(job_id: str) -> DiagnosisResponse:
+    """Get the full diagnosis detail for a job."""
+    job = await JobStateManager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    pre_diagnosis_states = (
+        "uploaded", "ingesting", "converting", "rendering", "ingested",
+    )
+    if job["status"] in pre_diagnosis_states:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Diagnosis not yet available. Current status: {job['status']}",
+        )
+
+    if job["status"] == "diagnosing":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Diagnosis is currently in progress",
+        )
+
+    diagnosis_path = job.get("diagnosis_path")
+    if not diagnosis_path or not Path(diagnosis_path).exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Diagnosis results not found on disk",
+        )
+
+    import aiofiles
+    async with aiofiles.open(diagnosis_path, "r") as f:
+        diagnosis_data = json.loads(await f.read())
+
+    return DiagnosisResponse(
+        job_id=job_id,
+        status=job["status"],
+        diagnosis=diagnosis_data,
+        cached=job.get("diagnosis_cached", "false") == "true",
+    )
+
+
+@router.post("/jobs/{job_id}/diagnose", status_code=status.HTTP_202_ACCEPTED)
+async def trigger_diagnosis(job_id: str) -> dict:
+    """Manually trigger or re-trigger diagnosis for a job."""
+    job = await JobStateManager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job["status"] not in ("ingested", "diagnosed"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot diagnose from status: {job['status']}",
+        )
+
+    await diagnose_document.kiq(job_id=job_id)
+    return {"job_id": job_id, "message": "Diagnosis started"}
 
 
 @router.get("/jobs/{job_id}/fixes")
