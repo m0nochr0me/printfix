@@ -1,0 +1,15 @@
+*.log
+*.tmp
+*.bak
+*.ipynb
+*.pyc
+*.pyo
+
+.claude
+.github/
+*mcp.
+
+.venv/
+.lancedb/
+__pycache__/
+scratch/

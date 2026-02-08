@@ -1,0 +1,24 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# .env
+.env
+
+# Virtual environments
+.venv
+
+# DB
+.lancedb/
+
+# Scratch files
+scratch/
+
+# AI assistant files
+.claude/
+.github/
+*mcp.json
