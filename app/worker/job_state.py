@@ -5,8 +5,6 @@ Each job is stored as a Redis hash at key ``printfix:job:{job_id}`` with fields
 for status, timestamps, metadata, and processing results.
 """
 
-from __future__ import annotations
-
 import json
 from datetime import UTC, datetime
 
@@ -37,8 +35,13 @@ class JobStateManager:
     @classmethod
     async def get_redis(cls) -> Redis:
         if cls._redis is None:
-            url = _build_url()
-            cls._redis = Redis.from_url(url, decode_responses=True)
+            cls._redis = Redis(
+                host=settings.REDIS_HOST,
+                port=settings.REDIS_PORT,
+                db=settings.REDIS_DB_JOBS,
+                password=settings.REDIS_PASSWORD,
+                decode_responses=True,
+            )
         return cls._redis
 
     @classmethod
@@ -64,7 +67,7 @@ class JobStateManager:
         }
         for k, v in kwargs.items():
             mapping[k] = json.dumps(v) if isinstance(v, (dict, list)) else str(v)
-        await r.hset(cls._key(job_id), mapping=mapping)
+        await r.hset(cls._key(job_id), mapping=mapping) # type: ignore
         await r.expire(cls._key(job_id), settings.JOB_TTL_SECONDS)
 
     @classmethod
@@ -77,7 +80,7 @@ class JobStateManager:
         extra: dict | None = None,
     ) -> None:
         r = await cls.get_redis()
-        current = await r.hget(cls._key(job_id), "status")
+        current = await r.hget(cls._key(job_id), "status") # type: ignore
         if current and new_status not in VALID_TRANSITIONS.get(current, set()):
             logger.warning(
                 f"Job {job_id}: invalid transition {current} → {new_status}"
@@ -95,20 +98,15 @@ class JobStateManager:
         if extra:
             for k, v in extra.items():
                 updates[k] = json.dumps(v) if isinstance(v, (dict, list)) else str(v)
-        await r.hset(cls._key(job_id), mapping=updates)
+        await r.hset(cls._key(job_id), mapping=updates) # type: ignore
 
     @classmethod
     async def get_job(cls, job_id: str) -> dict | None:
         r = await cls.get_redis()
-        data = await r.hgetall(cls._key(job_id))
+        data = await r.hgetall(cls._key(job_id)) # type: ignore
         return dict(data) if data else None
 
     @classmethod
     async def delete_job(cls, job_id: str) -> bool:
         r = await cls.get_redis()
         return bool(await r.delete(cls._key(job_id)))
-
-
-def _build_url() -> str:
-    auth = f":{settings.REDIS_PASSWORD}@" if settings.REDIS_PASSWORD else ""
-    return f"redis://{auth}{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB_JOBS}"
