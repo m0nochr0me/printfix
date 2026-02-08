@@ -19,6 +19,8 @@ from app.core.config import settings
 from app.core.db import close_db
 from app.core.log import logger
 from app.schema.status import HealthCheckResponse, IndexResponse
+from app.worker.broker import broker as taskiq_broker
+from app.worker.job_state import JobStateManager
 
 exec_id = ULID()
 start_time = perf_counter()
@@ -63,10 +65,17 @@ async def lifespan(app: FastAPI):
         logger.info(f"Listening on: {settings.APP_HOST}:{settings.APP_PORT} - Workers: {settings.APP_WORKERS}")
         logger.info(f"Exec ID: {exec_id}")
 
+        if not taskiq_broker.is_worker_process:
+            await taskiq_broker.startup()
+            logger.info("Taskiq broker started (client mode)")
+
         try:
             yield
         finally:
             logger.info(f"Shutting down {settings.PROJECT_NAME}...")
+            if not taskiq_broker.is_worker_process:
+                await taskiq_broker.shutdown()
+            await JobStateManager.close()
             await close_db()
             await asyncio.sleep(2)  # Failsafe delay
 

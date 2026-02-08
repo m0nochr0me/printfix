@@ -15,6 +15,9 @@ wheels/
 # DB
 .lancedb/
 
+# Job file storage
+data/
+
 # Scratch files
 scratch/
 

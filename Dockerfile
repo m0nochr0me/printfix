@@ -11,6 +11,12 @@ ENV PYTHONUNBUFFERED=1
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_PROJECT_ENVIRONMENT=/usr/local
 
+# System dependencies for document conversion and rendering
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libreoffice-nogui \
+    poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install
 WORKDIR /app
 

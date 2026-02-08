@@ -29,12 +29,26 @@ class Settings(BaseSettings):
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_DB_CACHE: int = 4
+    REDIS_DB_BROKER: int = 0
+    REDIS_DB_RESULTS: int = 1
+    REDIS_DB_JOBS: int = 2
     REDIS_PASSWORD: str | None = None
     CACHE_TTL: int = 3600
     CACHE_TTL_LONG: int = 7 * 24 * 3600  # 7 days
 
+    VECTOR_STORE_PATH: str = ".lancedb"
+    STORAGE_DIR: str = "./data"
+    MAX_UPLOAD_SIZE_MB: int = 100
+    ALLOWED_EXTENSIONS: list[str] = [
+        ".pdf", ".docx", ".xlsx", ".pptx",
+        ".odt", ".ods", ".odp",
+        ".jpg", ".jpeg", ".png", ".tiff",
+    ]
+
+    WORKER_CONCURRENCY: int = 2
+    JOB_TTL_SECONDS: int = 86400  # 24 hours
+
     GOOGLE_API_KEY: str
-    # TODO: add necessary variables
 
 
     class Config:

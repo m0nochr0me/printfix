@@ -6,13 +6,21 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "aiocache>=0.12.3",
+    "aiofiles>=24.1.0",
     "aiohttp>=3.13.3",
     "asgi-correlation-id>=4.3.4",
     "fastapi>=0.128.4",
     "fastmcp>=3.0.0b1",
     "google-genai>=1.62.0",
+    "lancedb>=0.20.0",
     "loguru>=0.7.3",
+    "pdf2image>=1.17.0",
+    "pikepdf>=9.0.0",
     "pillow>=12.0.0",
+    "python-multipart>=0.0.20",
     "python-ulid>=3.1.0",
     "redis>=7.1.0",
+    "taskiq>=0.12.1",
+    "taskiq-fastapi>=0.4.0",
+    "taskiq-redis>=1.2.2",
 ]
