@@ -52,7 +52,7 @@ class Settings(BaseSettings):
 
     # Anthropic (only needed for Thorough effort level)
     ANTHROPIC_API_KEY: str | None = None
-    ANTHROPIC_DIAGNOSIS_MODEL: str = "claude-sonnet-4-20250514"
+    ANTHROPIC_DIAGNOSIS_MODEL: str = "claude-sonnet-4-5-20250929"
 
     # Diagnosis thresholds
     DIAGNOSIS_MIN_MARGIN_INCHES: float = 0.5
