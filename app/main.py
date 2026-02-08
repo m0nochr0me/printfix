@@ -16,7 +16,6 @@ from ulid import ULID
 from app.api.printfix import router as printfix_router
 from app.context.printfix import server as printfix_server
 from app.core.config import settings
-from app.core.db import close_db
 from app.core.log import logger
 from app.schema.status import HealthCheckResponse, IndexResponse
 from app.worker.broker import broker as taskiq_broker
@@ -76,7 +75,6 @@ async def lifespan(app: FastAPI):
             if not taskiq_broker.is_worker_process:
                 await taskiq_broker.shutdown()
             await JobStateManager.close()
-            await close_db()
             await asyncio.sleep(2)  # Failsafe delay
 
 
