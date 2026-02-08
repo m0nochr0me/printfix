@@ -23,6 +23,7 @@ from app.schema.job import (
     PageSize,
 )
 from app.schema.diagnosis import DiagnosisResponse
+from app.schema.fix import FixLog
 from app.worker.job_state import JobStateManager
 from app.worker.tasks import diagnose_document, ingest_document
 
@@ -238,9 +239,15 @@ async def trigger_diagnosis(job_id: str) -> dict:
 
 
 @router.get("/jobs/{job_id}/fixes")
-async def get_fixes(job_id: str) -> dict:
-    """Get the list of fixes applied to a job. (Phase 3)"""
-    raise HTTPException(status_code=501, detail="Not implemented yet — coming in Phase 3")
+async def get_fixes(job_id: str) -> FixLog:
+    """Get the list of fixes applied to a job."""
+    job = await JobStateManager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    from app.fixes.common import get_fix_log
+
+    return await get_fix_log(job_id)
 
 
 @router.post("/jobs/{job_id}/approve")

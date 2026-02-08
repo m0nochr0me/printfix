@@ -88,7 +88,7 @@ async def merge_diagnoses_ai(
     config: EffortConfig,
 ) -> DocumentDiagnosis:
     """AI-assisted merge using Claude for Thorough effort level."""
-    from app.core.ai import get_anthropic_client
+    from app.core.ai import extract_anthropic_text, get_anthropic_client
 
     client = get_anthropic_client()
     if not client:
@@ -124,7 +124,7 @@ async def merge_diagnoses_ai(
             messages=[{"role": "user", "content": prompt}],
         )
 
-        raw_text = response.content[0].text
+        raw_text = extract_anthropic_text(response)
         data = json.loads(raw_text)
         return _parse_ai_merge_response(
             data, job_id, effort_level, file_type, page_count,

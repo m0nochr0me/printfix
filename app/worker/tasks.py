@@ -224,7 +224,7 @@ async def _claude_structural_review(
     """Use Claude to review and refine structural findings (Thorough only)."""
     import asyncio
 
-    from app.core.ai import get_anthropic_client
+    from app.core.ai import extract_anthropic_text, get_anthropic_client
     from app.core.prompts import STRUCTURAL_REVIEW_PROMPT
 
     client = get_anthropic_client()
@@ -250,7 +250,7 @@ async def _claude_structural_review(
             messages=[{"role": "user", "content": prompt}],
         )
 
-        raw_text = response.content[0].text
+        raw_text = extract_anthropic_text(response)
         data = json.loads(raw_text)
 
         reviewed: list[DiagnosisIssue] = []

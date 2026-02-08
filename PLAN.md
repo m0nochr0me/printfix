@@ -326,11 +326,11 @@ printfix/
 - [x] Effort level routing (model selection)
 
 ### Phase 3 — Core Fixes
-- [ ] MCP tool server setup
-- [ ] Page layout fixes (margins, page size, orientation)
-- [ ] Font fixes (substitution, embedding)
-- [ ] Table fixes (auto-fit, text resize)
-- [ ] Page break fixes
+- [x] MCP tool server setup
+- [x] Page layout fixes (margins, page size, orientation)
+- [x] Font fixes (substitution, embedding)
+- [x] Table fixes (auto-fit, text resize)
+- [x] Page break fixes
 
 ### Phase 4 — Orchestration
 - [ ] AI agent fix loop (diagnose → fix → re-render → re-diagnose)
