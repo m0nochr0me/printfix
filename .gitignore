@@ -24,4 +24,5 @@ scratch/
 # AI assistant files
 .claude/
 .github/
+.vscode/
 *mcp.json
