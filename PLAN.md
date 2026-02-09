@@ -13,7 +13,7 @@ A SaaS REST API that makes customer documents print-ready by automatically detec
 
 ## 1. High-Level Flow
 
-```
+```text
 Upload  →  Ingest & Normalize  →  AI Diagnosis  →  Fix Loop  →  Verify  →  Deliver
                                        ↑               |
                                        └── re-diagnose ┘
@@ -21,7 +21,7 @@ Upload  →  Ingest & Normalize  →  AI Diagnosis  →  Fix Loop  →  Verify  
 
 Each job progresses through a state machine:
 
-```
+```text
 uploaded → ingesting → diagnosing → fixing → verifying → done
                                                       ↘ needs_review (if confidence < threshold)
 ```
@@ -31,7 +31,7 @@ uploaded → ingesting → diagnosing → fixing → verifying → done
 ## 2. Effort Levels
 
 | Level | Diagnosis Model | Orchestration Model | Passes | Use Case |
-|-------|----------------|---------------------|--------|----------|
+| - | - | - | - | - |
 | **Quick** | Gemini Flash | Gemini Flash | 1 | Simple fixes: margins, page size, orientation |
 | **Standard** | Gemini Pro | Gemini Pro | up to 3 | Most jobs: tables, fonts, page breaks, images |
 | **Thorough** | Gemini Pro (visual) + Claude Opus (structural) | Claude Opus | up to 5 | Complex layouts, multi-section documents, tricky edge cases |
@@ -43,6 +43,7 @@ The effort level controls: which models are called, how many diagnosis-fix-verif
 ## 3. File Ingestion Layer
 
 ### Supported Input Formats
+
 - PDF (.pdf)
 - Microsoft Word (.docx)
 - Microsoft Excel (.xlsx)
@@ -51,6 +52,7 @@ The effort level controls: which models are called, how many diagnosis-fix-verif
 - Images (.jpg, .png, .tiff) — treated as single-page print jobs
 
 ### Ingestion Pipeline
+
 1. Accept upload via REST API (multipart form)
 2. Validate file type and size limits
 3. Store original file (S3-compatible object storage or local disk)
@@ -64,6 +66,7 @@ The effort level controls: which models are called, how many diagnosis-fix-verif
 6. Render each page to PNG via `pdf2image` for AI visual inspection
 
 ### Libraries
+
 - `python-docx` — DOCX parsing and editing
 - `openpyxl` — XLSX parsing and editing
 - `python-pptx` — PPTX parsing and editing
@@ -82,6 +85,7 @@ Two complementary analysis passes that feed into a unified issue list.
 Send rendered page images to the AI model with a structured prompt requesting JSON output.
 
 **Detected issues:**
+
 - Content clipped at page edges
 - Text too close to margins (not enough bleed/safe area)
 - Orphan/widow lines
@@ -94,6 +98,7 @@ Send rendered page images to the AI model with a structured prompt requesting JS
 - Visual inconsistencies (mixed fonts, erratic spacing)
 
 **Output per page:**
+
 ```json
 {
   "page": 3,
@@ -135,32 +140,38 @@ The AI agent acts as the conductor. It reads the diagnosis, selects appropriate 
 ### MCP Tools
 
 **Page & Layout**
+
 - `set_page_size(doc, width, height)` — resize to target paper (A4, Letter, etc.)
 - `set_margins(doc, top, bottom, left, right)` — adjust document margins
 - `set_orientation(doc, orientation)` — portrait / landscape
 - `remove_blank_pages(doc)` — delete accidental empty pages
 
 **Text & Typography**
+
 - `replace_font(doc, from_font, to_font)` — substitute missing/problematic fonts
 - `embed_fonts(doc)` — embed all used fonts into the document
 - `adjust_font_size(doc, selector, new_size)` — resize text in a section/style
 - `fix_orphans_widows(doc, strategy)` — adjust spacing to eliminate orphans/widows
 
 **Tables**
+
 - `auto_fit_tables(doc)` — shrink columns to fit page width
 - `resize_table_text(doc, table_index, max_font_size)` — reduce text in overflowing cells
 - `split_wide_table(doc, table_index)` — break a too-wide table across pages
 
 **Images**
+
 - `convert_colorspace(doc, target)` — RGB to CMYK conversion
 - `check_image_dpi(doc, min_dpi)` — flag or upscale low-res images
 - `resize_image_to_fit(doc, image_index)` — scale image within page bounds
 
 **Page Breaks**
+
 - `fix_page_breaks(doc, strategy)` — reflow content with smarter break points
 - `remove_manual_breaks(doc)` — strip hard page breaks, let content reflow
 
 **PDF-Specific Fallbacks**
+
 - `pdf_crop_margins(pdf, margins)` — adjust PDF crop/media boxes
 - `pdf_scale_content(pdf, scale_factor)` — scale all content to fit
 - `pdf_rotate_pages(pdf, pages, angle)` — rotate specific pages
@@ -168,7 +179,7 @@ The AI agent acts as the conductor. It reads the diagnosis, selects appropriate 
 
 ### Fix Loop
 
-```
+```pseudocode
 for iteration in range(max_iterations):       # controlled by effort level
     diagnosis = diagnose(doc)
     if diagnosis.is_clean or diagnosis.only_info:
@@ -182,6 +193,7 @@ for iteration in range(max_iterations):       # controlled by effort level
 ### Smart Auto Mode
 
 When aggressiveness is set to "Smart Auto", the AI agent receives the full diagnosis and decides per-issue:
+
 - **Conservative** for content-affecting changes (font substitution, table splitting)
 - **Aggressive** for safe structural changes (margins, page size, orientation, blank page removal)
 - **Skip** for issues below a severity threshold or where the fix risks making things worse
@@ -204,6 +216,7 @@ After the fix loop completes:
 5. Produce a human-readable fix report (what was changed and why)
 
 **Threshold behavior:**
+
 - Above threshold → auto-approve, mark as `done`
 - Below threshold → mark as `needs_review`, notify shop employee
 
@@ -213,7 +226,7 @@ After the fix loop completes:
 
 ### Endpoints
 
-```
+```text
 POST   /jobs                        Upload file, set effort level & aggressiveness
 GET    /jobs/{id}                   Job status, diagnosis summary, confidence score
 GET    /jobs/{id}/diagnosis         Full diagnosis detail (all issues found)
@@ -272,7 +285,7 @@ target_colorspace: "cmyk" | "rgb" | "original"     (optional)
 
 ## 9. Project Structure
 
-```
+```text
 printfix/
 ├── main.py                     FastAPI app entrypoint
 ├── pyproject.toml
@@ -312,6 +325,7 @@ printfix/
 ## 10. Implementation Order
 
 ### Phase 1 — Foundation
+
 - [x] FastAPI app skeleton with job CRUD endpoints
 - [x] File upload + storage
 - [x] Redis job queue + state machine
@@ -319,6 +333,7 @@ printfix/
 - [x] Page-to-image rendering pipeline
 
 ### Phase 2 — Diagnosis
+
 - [x] Gemini integration for visual page analysis
 - [x] Structural analysis for DOCX (margins, fonts, tables, page breaks)
 - [x] Structural analysis for PDF
@@ -326,6 +341,7 @@ printfix/
 - [x] Effort level routing (model selection)
 
 ### Phase 3 — Core Fixes
+
 - [x] MCP tool server setup
 - [x] Page layout fixes (margins, page size, orientation)
 - [x] Font fixes (substitution, embedding)
@@ -333,24 +349,28 @@ printfix/
 - [x] Page break fixes
 
 ### Phase 4 — Orchestration
+
 - [x] AI agent fix loop (diagnose → fix → re-render → re-diagnose)
 - [x] Smart Auto aggressiveness mode
 - [x] Claude integration for thorough-effort orchestration
 - [x] Iteration cap and convergence detection
 
 ### Phase 5 — Verification & Delivery
+
 - [x] Before/after rendering and comparison
 - [x] AI confidence scoring
 - [x] Fix report generation
 - [x] Download endpoint (fixed original + PDF)
 
 ### Phase 6 — PDF Fallbacks
+
 - [x] PDF margin/crop adjustments
 - [x] PDF content scaling
 - [x] PDF page rotation
 - [x] Fallback routing when original-format fixes fail
 
 ### Phase 7 — Hardening
+
 - [ ] Image colorspace conversion (RGB → CMYK)
 - [ ] Image DPI detection and handling
 - [ ] XLSX and PPTX structural analysis + fixes
