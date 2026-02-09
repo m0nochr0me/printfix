@@ -284,14 +284,26 @@ async def _run_diagnosis(
     if pdf_path:
         structural_issues = await analyze_pdf(pdf_path, job_id)
 
-    # Additionally analyze DOCX if applicable
+    # Additionally analyze original format if applicable
+    original_dir = get_job_dir(job_id) / "original"
     if file_type == ".docx":
         from app.diagnosis.structural_docx import analyze_docx
 
-        original_dir = get_job_dir(job_id) / "original"
         docx_files = list(original_dir.glob("*.docx"))
         if docx_files:
             structural_issues.extend(await analyze_docx(str(docx_files[0]), job_id))
+    elif file_type == ".xlsx":
+        from app.diagnosis.structural_xlsx import analyze_xlsx
+
+        xlsx_files = list(original_dir.glob("*.xlsx"))
+        if xlsx_files:
+            structural_issues.extend(await analyze_xlsx(str(xlsx_files[0]), job_id))
+    elif file_type == ".pptx":
+        from app.diagnosis.structural_pptx import analyze_pptx
+
+        pptx_files = list(original_dir.glob("*.pptx"))
+        if pptx_files:
+            structural_issues.extend(await analyze_pptx(str(pptx_files[0]), job_id))
 
     # Merge (rule-based within fix loop — skip expensive AI merge)
     if effort_config.use_ai_merge:

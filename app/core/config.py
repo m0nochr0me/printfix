@@ -59,6 +59,17 @@ class Settings(BaseSettings):
     DIAGNOSIS_MIN_FONT_PT: float = 8.0
     DIAGNOSIS_MIN_IMAGE_DPI: int = 150
 
+    # Timeouts & retries
+    AI_API_TIMEOUT_SECONDS: int = 60
+    AI_API_MAX_RETRIES: int = 3
+    LIBREOFFICE_TIMEOUT_SECONDS: int = 120
+    FIX_EXECUTION_TIMEOUT_SECONDS: int = 30
+
+    # Rate limiting
+    RATE_LIMIT_REQUESTS: int = 60
+    RATE_LIMIT_WINDOW_SECONDS: int = 60
+    REDIS_DB_RATE_LIMIT: int = 5
+
 
     class Config:
         env_file = ".env"

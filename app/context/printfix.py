@@ -26,6 +26,24 @@ from app.fixes.page_layout import (
 from app.fixes.page_layout import (
     set_page_size as _set_page_size,
 )
+from app.fixes.images import (
+    check_image_dpi as _check_image_dpi,
+)
+from app.fixes.images import (
+    convert_pdf_colorspace as _convert_pdf_colorspace,
+)
+from app.fixes.pptx import (
+    adjust_pptx_font_size as _adjust_pptx_font_size,
+)
+from app.fixes.pptx import (
+    set_pptx_slide_size as _set_pptx_slide_size,
+)
+from app.fixes.xlsx import (
+    set_xlsx_margins as _set_xlsx_margins,
+)
+from app.fixes.xlsx import (
+    set_xlsx_page_setup as _set_xlsx_page_setup,
+)
 from app.fixes.pdf_fallback import (
     pdf_crop_margins as _pdf_crop_margins,
 )
@@ -246,6 +264,105 @@ async def pdf_rotate_pages(
     """Rotate PDF pages. Angle must be 0/90/180/270. Pages are 1-indexed; None=all."""
     pdf_path = await _get_pdf_path(job_id)
     result = await _pdf_rotate_pages(pdf_path, job_id, pages, angle)
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+# -- Image Tools --
+
+
+@server.tool()
+async def convert_colorspace(
+    job_id: str,
+    target_colorspace: str = "cmyk",
+) -> str:
+    """Convert RGB images in a PDF to CMYK for professional print output."""
+    pdf_path = await _get_pdf_path(job_id)
+    result = await _convert_pdf_colorspace(pdf_path, job_id, target_colorspace)
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+@server.tool()
+async def check_image_dpi(
+    job_id: str,
+    min_dpi: int = 150,
+) -> str:
+    """Report low-DPI images in a PDF. Flags but cannot upscale."""
+    pdf_path = await _get_pdf_path(job_id)
+    result = await _check_image_dpi(pdf_path, job_id, min_dpi)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+# -- XLSX Tools --
+
+
+@server.tool()
+async def set_xlsx_margins(
+    job_id: str,
+    top: float = 0.75,
+    bottom: float = 0.75,
+    left: float = 0.75,
+    right: float = 0.75,
+) -> str:
+    """Set print margins on all sheets of an XLSX file. Values in inches."""
+    file_path, _ = await resolve_document(job_id)
+    result = await _set_xlsx_margins(file_path, job_id, top, bottom, left, right)
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+@server.tool()
+async def set_xlsx_page_setup(
+    job_id: str,
+    orientation: str = "portrait",
+    paper_size: int = 1,
+    fit_to_page: bool = True,
+) -> str:
+    """Configure print page setup on all sheets. paper_size: 1=Letter, 9=A4."""
+    file_path, _ = await resolve_document(job_id)
+    result = await _set_xlsx_page_setup(
+        file_path, job_id, orientation, paper_size, fit_to_page,
+    )
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+# -- PPTX Tools --
+
+
+@server.tool()
+async def set_pptx_slide_size(
+    job_id: str,
+    width: float = 10.0,
+    height: float = 7.5,
+) -> str:
+    """Set slide dimensions. Values in inches. Default 4:3 standard (10x7.5)."""
+    file_path, _ = await resolve_document(job_id)
+    result = await _set_pptx_slide_size(file_path, job_id, width, height)
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+@server.tool()
+async def adjust_pptx_font_size(
+    job_id: str,
+    min_size_pt: float = 10.0,
+) -> str:
+    """Enforce minimum font size across all text in a PPTX presentation."""
+    file_path, _ = await resolve_document(job_id)
+    result = await _adjust_pptx_font_size(file_path, job_id, min_size_pt)
     if result.success:
         await re_render_job(job_id)
     await record_fix(job_id, result)

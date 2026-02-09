@@ -68,10 +68,26 @@ async def lifespan(app: FastAPI):
             await taskiq_broker.startup()
             logger.info("Taskiq broker started (client mode)")
 
+        # Initialize rate limiter
+        from redis.asyncio import Redis
+
+        from app.core.rate_limit import RateLimiter
+
+        rl_redis = Redis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=settings.REDIS_DB_RATE_LIMIT,
+            password=settings.REDIS_PASSWORD,
+        )
+        app.state.rate_limiter = RateLimiter(rl_redis)
+        logger.info("Rate limiter initialized")
+
         try:
             yield
         finally:
             logger.info(f"Shutting down {settings.PROJECT_NAME}...")
+            if hasattr(app.state, "rate_limiter"):
+                await app.state.rate_limiter.close()
             if not taskiq_broker.is_worker_process:
                 await taskiq_broker.shutdown()
             await JobStateManager.close()
@@ -92,6 +108,23 @@ app.add_middleware(
     generator=lambda: str(ULID()),
     validator=None,
 )
+
+
+@app.middleware("http")
+async def request_logging_middleware(request: Request, call_next):
+    """Log method, path, status, and duration for every HTTP request."""
+    t0 = perf_counter()
+    response = await call_next(request)
+    duration_ms = (perf_counter() - t0) * 1000
+    # Skip noisy paths
+    if request.url.path not in ("/favicon.ico", "/health"):
+        logger.info(
+            f"{request.method} {request.url.path} "
+            f"status={response.status_code} "
+            f"duration={duration_ms:.1f}ms"
+        )
+    return response
+
 
 app.include_router(printfix_router)
 app.mount("/app", mcp_app)

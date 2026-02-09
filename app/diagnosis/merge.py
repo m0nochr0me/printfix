@@ -117,14 +117,26 @@ async def merge_diagnoses_ai(
     model = config.claude_model or settings.ANTHROPIC_DIAGNOSIS_MODEL
 
     try:
-        response = await asyncio.to_thread(
-            client.messages.create,
-            model=model,
-            max_tokens=4096,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        from app.core.retry import with_retry
 
-        raw_text = extract_anthropic_text(response)
+        async def _call_claude() -> str:
+            resp = await asyncio.wait_for(
+                asyncio.to_thread(
+                    client.messages.create,
+                    model=model,
+                    max_tokens=4096,
+                    messages=[{"role": "user", "content": prompt}],
+                ),
+                timeout=settings.AI_API_TIMEOUT_SECONDS,
+            )
+            return extract_anthropic_text(resp)
+
+        raw_text = await with_retry(
+            _call_claude,
+            max_retries=settings.AI_API_MAX_RETRIES,
+            retryable=(TimeoutError, asyncio.TimeoutError, ConnectionError, OSError),
+            label=f"claude-merge({job_id})",
+        )
         data = json.loads(raw_text)
         return _parse_ai_merge_response(
             data, job_id, effort_level, file_type, page_count,

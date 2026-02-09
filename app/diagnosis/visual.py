@@ -118,17 +118,30 @@ async def _inspect_batch(
         parts.append(Part.from_text(text=f"[Page {page_num}]"))
     parts.append(Part.from_text(text=prompt_text))
 
-    response = await asyncio.to_thread(
-        ai_client.models.generate_content,
-        model=model,
-        contents=Content(parts=parts),
-        config=GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.2,
-        ),
-    )
+    from app.core.config import settings
+    from app.core.retry import with_retry
 
-    raw_text = response.text or ""
+    async def _call_gemini() -> str:
+        resp = await asyncio.wait_for(
+            asyncio.to_thread(
+                ai_client.models.generate_content,
+                model=model,
+                contents=Content(parts=parts),
+                config=GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.2,
+                ),
+            ),
+            timeout=settings.AI_API_TIMEOUT_SECONDS,
+        )
+        return resp.text or ""
+
+    raw_text = await with_retry(
+        _call_gemini,
+        max_retries=settings.AI_API_MAX_RETRIES,
+        retryable=(TimeoutError, asyncio.TimeoutError, ConnectionError, OSError),
+        label=f"gemini-visual({page_range})",
+    )
     return _parse_visual_response(raw_text, page_numbers)
 
 

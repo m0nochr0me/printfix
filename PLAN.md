@@ -371,9 +371,9 @@ printfix/
 
 ### Phase 7 — Hardening
 
-- [ ] Image colorspace conversion (RGB → CMYK)
-- [ ] Image DPI detection and handling
-- [ ] XLSX and PPTX structural analysis + fixes
-- [ ] Error handling, retries, timeouts
-- [ ] API authentication and rate limiting
-- [ ] Logging and observability
+- [x] Image colorspace conversion (RGB → CMYK)
+- [x] Image DPI detection and handling
+- [x] XLSX and PPTX structural analysis + fixes
+- [x] Error handling, retries, timeouts
+- [x] API authentication and rate limiting
+- [x] Logging and observability

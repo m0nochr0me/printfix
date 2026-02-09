@@ -33,6 +33,9 @@ class IssueType(StrEnum):
     table_overflow = "table_overflow"
     hidden_content = "hidden_content"
     tracked_changes = "tracked_changes"
+    no_print_area = "no_print_area"
+    slide_size_mismatch = "slide_size_mismatch"
+    text_outside_printable = "text_outside_printable"
 
 
 class IssueSource(StrEnum):

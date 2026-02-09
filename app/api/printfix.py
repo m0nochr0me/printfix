@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from fastapi.responses import FileResponse
 from ulid import ULID
 
-from app.api.deps import verify_token
+from app.api.deps import check_rate_limit, verify_token
 from app.core.config import settings
 from app.core.storage import delete_job_files, save_upload
 from app.schema.job import (
@@ -33,7 +33,7 @@ __all__ = ("router",)
 router = APIRouter(
     prefix="/v1",
     tags=["jobs"],
-    dependencies=[Depends(verify_token)],
+    dependencies=[Depends(verify_token), Depends(check_rate_limit)],
 )
 
 

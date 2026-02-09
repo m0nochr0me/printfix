@@ -8,6 +8,7 @@ import json
 import os
 from hashlib import blake2s
 from pathlib import Path
+from time import perf_counter
 
 import aiofiles
 
@@ -43,7 +44,9 @@ async def fix_document(job_id: str) -> dict:
 
         from app.orchestration.orchestrator import run_fix_loop
 
+        t0 = perf_counter()
         result = await run_fix_loop(job_id)
+        logger.info(f"Job {job_id}: fix loop took {perf_counter() - t0:.1f}s")
 
         # Persist orchestration result
         result_path = get_job_dir(job_id) / "orchestration.json"
@@ -65,7 +68,9 @@ async def fix_document(job_id: str) -> dict:
         # Run verification: before/after rendering, confidence scoring, report
         from app.verification import run_verification, AUTO_APPROVE_THRESHOLD
 
+        t0 = perf_counter()
         verification = await run_verification(job_id)
+        logger.info(f"Job {job_id}: verification took {perf_counter() - t0:.1f}s")
         verification_path = get_job_dir(job_id) / "verification.json"
         confidence = verification.confidence.final_score
         readiness = verification.confidence.print_readiness
@@ -223,21 +228,25 @@ async def diagnose_document(job_id: str) -> dict:
             f"Job {job_id}: starting visual inspection "
             f"({effort_config.visual_model})"
         )
+        t0 = perf_counter()
         visual_pages = await inspect_pages_visually(
             page_image_paths=page_images,
             effort_config=effort_config,
             file_type=file_type,
             job_id=job_id,
         )
+        logger.info(f"Job {job_id}: visual inspection took {perf_counter() - t0:.1f}s")
 
         # -- Step 3: Structural analysis --
         logger.info(f"Job {job_id}: starting structural analysis")
+        t0 = perf_counter()
         structural_issues = await _run_structural_analysis(
             job_id=job_id,
             file_type=file_type,
             pdf_path=pdf_path,
             effort_config=effort_config,
         )
+        logger.info(f"Job {job_id}: structural analysis took {perf_counter() - t0:.1f}s")
 
         # -- Step 4: Merge --
         if effort_config.use_ai_merge:
@@ -313,6 +322,18 @@ async def _run_structural_analysis(
         docx_files = list(original_dir.glob("*.docx"))
         if docx_files:
             issues.extend(await analyze_docx(str(docx_files[0]), job_id))
+    elif file_type == ".xlsx":
+        from app.diagnosis.structural_xlsx import analyze_xlsx
+
+        xlsx_files = list(original_dir.glob("*.xlsx"))
+        if xlsx_files:
+            issues.extend(await analyze_xlsx(str(xlsx_files[0]), job_id))
+    elif file_type == ".pptx":
+        from app.diagnosis.structural_pptx import analyze_pptx
+
+        pptx_files = list(original_dir.glob("*.pptx"))
+        if pptx_files:
+            issues.extend(await analyze_pptx(str(pptx_files[0]), job_id))
 
     # For Thorough: Claude structural review
     if effort_config.use_claude_structural and issues:

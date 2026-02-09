@@ -237,6 +237,84 @@ _PDF_ISSUE_MAP: dict[str, list[FixAction]] = {
             reasoning="Rotate pages to correct orientation",
         ),
     ],
+    "rgb_colorspace": [
+        FixAction(
+            tool_name="convert_colorspace",
+            params={"target_colorspace": "cmyk"},
+            target_issues=["rgb_colorspace"],
+            reasoning="Convert RGB images to CMYK for professional print",
+        ),
+    ],
+    "low_dpi_image": [
+        FixAction(
+            tool_name="check_image_dpi",
+            params={"min_dpi": 150},
+            target_issues=["low_dpi_image"],
+            reasoning="Flag low-DPI images that may print poorly",
+        ),
+    ],
+}
+
+_XLSX_ISSUE_MAP: dict[str, list[FixAction]] = {
+    "margin_violation": [
+        FixAction(
+            tool_name="set_xlsx_margins",
+            params={"top": 0.75, "bottom": 0.75, "left": 0.75, "right": 0.75},
+            target_issues=["margin_violation"],
+            reasoning="Set safe print margins on all sheets",
+        ),
+    ],
+    "text_overflow": [
+        FixAction(
+            tool_name="set_xlsx_page_setup",
+            params={"orientation": "portrait", "paper_size": 1, "fit_to_page": True},
+            target_issues=["text_overflow"],
+            reasoning="Enable fit-to-page to prevent column overflow",
+        ),
+    ],
+    "table_overflow": [
+        FixAction(
+            tool_name="set_xlsx_page_setup",
+            params={"orientation": "landscape", "paper_size": 1, "fit_to_page": True},
+            target_issues=["table_overflow"],
+            reasoning="Switch to landscape with fit-to-page for wide content",
+        ),
+    ],
+    "wrong_orientation": [
+        FixAction(
+            tool_name="set_xlsx_page_setup",
+            params={"orientation": "landscape", "paper_size": 1, "fit_to_page": False},
+            target_issues=["wrong_orientation"],
+            reasoning="Switch sheet orientation to landscape",
+        ),
+    ],
+}
+
+_PPTX_ISSUE_MAP: dict[str, list[FixAction]] = {
+    "slide_size_mismatch": [
+        FixAction(
+            tool_name="set_pptx_slide_size",
+            params={"width": 10.0, "height": 7.5},
+            target_issues=["slide_size_mismatch"],
+            reasoning="Switch to 4:3 standard size for better print compatibility",
+        ),
+    ],
+    "small_font": [
+        FixAction(
+            tool_name="adjust_pptx_font_size",
+            params={"min_size_pt": 10.0},
+            target_issues=["small_font"],
+            reasoning="Enforce minimum readable font size",
+        ),
+    ],
+    "text_overflow": [
+        FixAction(
+            tool_name="adjust_pptx_font_size",
+            params={"min_size_pt": 10.0},
+            target_issues=["text_overflow"],
+            reasoning="Adjust font sizes to help prevent text overflow",
+        ),
+    ],
 }
 
 # Page sizes lookup
@@ -287,7 +365,14 @@ def plan_fixes_rule_based(
     the primary DOCX tools.
     """
     is_editable = _is_editable_format(file_type)
-    issue_map = _DOCX_ISSUE_MAP if is_editable else _PDF_ISSUE_MAP
+    if file_type == ".xlsx":
+        issue_map = _XLSX_ISSUE_MAP
+    elif file_type == ".pptx":
+        issue_map = _PPTX_ISSUE_MAP
+    elif is_editable:
+        issue_map = _DOCX_ISSUE_MAP
+    else:
+        issue_map = _PDF_ISSUE_MAP
     failed_issue_types = failed_issue_types or set()
     all_issues = _collect_issues(diagnosis)
 
@@ -431,40 +516,66 @@ async def _call_planning_model(prompt: str, effort_config: EffortConfig) -> str:
 
 
 async def _call_gemini(prompt: str, effort_config: EffortConfig) -> str:
-    """Call Gemini for fix planning."""
+    """Call Gemini for fix planning with retry + timeout."""
     from google.genai.types import GenerateContentConfig
 
     from app.core.ai import ai_client
+    from app.core.retry import with_retry
 
     model = effort_config.orchestration_model or "gemini-2.0-flash"
-    response = await asyncio.to_thread(
-        ai_client.models.generate_content,
-        model=model,
-        contents=prompt,
-        config=GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.2,
-        ),
+
+    async def _do_call() -> str:
+        resp = await asyncio.wait_for(
+            asyncio.to_thread(
+                ai_client.models.generate_content,
+                model=model,
+                contents=prompt,
+                config=GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.2,
+                ),
+            ),
+            timeout=settings.AI_API_TIMEOUT_SECONDS,
+        )
+        return resp.text or ""
+
+    return await with_retry(
+        _do_call,
+        max_retries=settings.AI_API_MAX_RETRIES,
+        retryable=(TimeoutError, asyncio.TimeoutError, ConnectionError, OSError),
+        label="gemini-planning",
     )
-    return response.text or ""
 
 
 async def _call_claude(prompt: str, effort_config: EffortConfig) -> str:
-    """Call Claude for fix planning (Thorough effort)."""
+    """Call Claude for fix planning (Thorough effort) with retry + timeout."""
     from app.core.ai import extract_anthropic_text, get_anthropic_client
+    from app.core.retry import with_retry
 
     client = get_anthropic_client()
     if not client:
         raise RuntimeError("Anthropic client not configured")
 
     model = effort_config.claude_model or settings.ANTHROPIC_DIAGNOSIS_MODEL
-    response = await asyncio.to_thread(
-        client.messages.create,
-        model=model,
-        max_tokens=4096,
-        messages=[{"role": "user", "content": prompt}],
+
+    async def _do_call() -> str:
+        resp = await asyncio.wait_for(
+            asyncio.to_thread(
+                client.messages.create,
+                model=model,
+                max_tokens=4096,
+                messages=[{"role": "user", "content": prompt}],
+            ),
+            timeout=settings.AI_API_TIMEOUT_SECONDS,
+        )
+        return extract_anthropic_text(resp)
+
+    return await with_retry(
+        _do_call,
+        max_retries=settings.AI_API_MAX_RETRIES,
+        retryable=(TimeoutError, asyncio.TimeoutError, ConnectionError, OSError),
+        label="claude-planning",
     )
-    return extract_anthropic_text(response)
 
 
 def _parse_ai_plan(raw_text: str, job_id: str, iteration: int) -> FixPlan:

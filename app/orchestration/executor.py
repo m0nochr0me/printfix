@@ -4,9 +4,11 @@ Fix executor — maps tool names to fix functions and runs them.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any, Callable, Coroutine
 
+from app.core.config import settings
 from app.core.log import logger
 from app.fixes.common import re_render_job, record_fix, resolve_document
 from app.fixes.page_breaks import fix_page_breaks, remove_manual_breaks
@@ -16,7 +18,10 @@ from app.fixes.page_layout import (
     set_orientation,
     set_page_size,
 )
+from app.fixes.images import check_image_dpi, convert_pdf_colorspace
 from app.fixes.pdf_fallback import pdf_crop_margins, pdf_rotate_pages, pdf_scale_content
+from app.fixes.pptx import adjust_pptx_font_size, set_pptx_slide_size
+from app.fixes.xlsx import set_xlsx_margins, set_xlsx_page_setup
 from app.fixes.tables import auto_fit_tables, resize_table_text
 from app.fixes.typography import adjust_font_size, replace_font
 from app.schema.fix import FixResult
@@ -46,6 +51,15 @@ TOOL_REGISTRY: dict[str, tuple[FixFunc, bool]] = {
     "pdf_crop_margins": (pdf_crop_margins, True),
     "pdf_scale_content": (pdf_scale_content, True),
     "pdf_rotate_pages": (pdf_rotate_pages, True),
+    # Image tools (PDF-level)
+    "convert_colorspace": (convert_pdf_colorspace, True),
+    "check_image_dpi": (check_image_dpi, True),
+    # XLSX tools
+    "set_xlsx_margins": (set_xlsx_margins, False),
+    "set_xlsx_page_setup": (set_xlsx_page_setup, False),
+    # PPTX tools
+    "set_pptx_slide_size": (set_pptx_slide_size, False),
+    "adjust_pptx_font_size": (adjust_pptx_font_size, False),
 }
 
 
@@ -77,7 +91,10 @@ async def execute_fix(job_id: str, action: FixAction) -> FixResult:
         else:
             file_path, _ = await resolve_document(job_id)
 
-        result = await fix_func(file_path, job_id, **action.params)
+        result = await asyncio.wait_for(
+            fix_func(file_path, job_id, **action.params),
+            timeout=settings.FIX_EXECUTION_TIMEOUT_SECONDS,
+        )
 
         if result.success:
             await re_render_job(job_id)
@@ -89,6 +106,19 @@ async def execute_fix(job_id: str, action: FixAction) -> FixResult:
             f"{'succeeded' if result.success else 'failed'}"
             f"{': ' + result.description if result.description else ''}"
         )
+        return result
+
+    except asyncio.TimeoutError:
+        result = FixResult(
+            tool_name=tool_name,
+            job_id=job_id,
+            success=False,
+            description=f"{tool_name} timed out after {settings.FIX_EXECUTION_TIMEOUT_SECONDS}s",
+            error="timeout",
+            timestamp=datetime.now(UTC),
+        )
+        await record_fix(job_id, result)
+        logger.error(f"Job {job_id}: {tool_name} timed out")
         return result
 
     except Exception as exc:
