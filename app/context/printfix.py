@@ -2,32 +2,50 @@
 Printfix MCP server — document fix tools.
 """
 
+from typing import Annotated
+
 from fastmcp import FastMCP
 
 from app.core.log import logger
-from app.fixes.common import record_fix, re_render_job, resolve_document
-from app.fixes.page_layout import (
-    remove_blank_pages as _remove_blank_pages,
-    set_margins as _set_margins,
-    set_orientation as _set_orientation,
-    set_page_size as _set_page_size,
-)
-from app.fixes.typography import (
-    adjust_font_size as _adjust_font_size,
-    replace_font as _replace_font,
-)
-from app.fixes.tables import (
-    auto_fit_tables as _auto_fit_tables,
-    resize_table_text as _resize_table_text,
-)
+from app.fixes.common import re_render_job, record_fix, resolve_document
 from app.fixes.page_breaks import (
     fix_page_breaks as _fix_page_breaks,
+)
+from app.fixes.page_breaks import (
     remove_manual_breaks as _remove_manual_breaks,
+)
+from app.fixes.page_layout import (
+    remove_blank_pages as _remove_blank_pages,
+)
+from app.fixes.page_layout import (
+    set_margins as _set_margins,
+)
+from app.fixes.page_layout import (
+    set_orientation as _set_orientation,
+)
+from app.fixes.page_layout import (
+    set_page_size as _set_page_size,
 )
 from app.fixes.pdf_fallback import (
     pdf_crop_margins as _pdf_crop_margins,
+)
+from app.fixes.pdf_fallback import (
     pdf_rotate_pages as _pdf_rotate_pages,
+)
+from app.fixes.pdf_fallback import (
     pdf_scale_content as _pdf_scale_content,
+)
+from app.fixes.tables import (
+    auto_fit_tables as _auto_fit_tables,
+)
+from app.fixes.tables import (
+    resize_table_text as _resize_table_text,
+)
+from app.fixes.typography import (
+    adjust_font_size as _adjust_font_size,
+)
+from app.fixes.typography import (
+    replace_font as _replace_font,
 )
 
 __all__ = ("server",)

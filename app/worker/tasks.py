@@ -27,6 +27,95 @@ from app.worker.broker import broker
 from app.worker.job_state import JobStateManager
 
 
+@broker.task(task_name="fix_document")
+async def fix_document(job_id: str) -> dict:
+    """
+    Fix orchestration + verification pipeline:
+      1. Transition to fixing state
+      2. Run the diagnose→fix→re-diagnose loop
+      3. Persist orchestration result
+      4. Run verification (before/after comparison, confidence scoring, report)
+      5. Auto-approve or mark for review based on confidence threshold
+    """
+    try:
+        await JobStateManager.set_state(job_id, "fixing")
+        logger.info(f"Job {job_id}: starting fix orchestration")
+
+        from app.orchestration.orchestrator import run_fix_loop
+
+        result = await run_fix_loop(job_id)
+
+        # Persist orchestration result
+        result_path = get_job_dir(job_id) / "orchestration.json"
+        os.makedirs(result_path.parent, exist_ok=True)
+        async with aiofiles.open(result_path, "w") as f:
+            await f.write(result.model_dump_json(indent=2))
+
+        # Transition to verifying and run Phase 5 verification
+        await JobStateManager.set_state(
+            job_id, "verifying",
+            extra={
+                "orchestration_path": str(result_path),
+                "issues_fixed": str(result.total_fixes_applied),
+                "issues_found": str(result.initial_issues),
+                "final_issues": str(result.final_issues),
+            },
+        )
+
+        # Run verification: before/after rendering, confidence scoring, report
+        from app.verification import run_verification, AUTO_APPROVE_THRESHOLD
+
+        verification = await run_verification(job_id)
+        verification_path = get_job_dir(job_id) / "verification.json"
+        confidence = verification.confidence.final_score
+        readiness = verification.confidence.print_readiness
+
+        if confidence >= AUTO_APPROVE_THRESHOLD:
+            await JobStateManager.set_state(
+                job_id, "done",
+                extra={
+                    "confidence": str(confidence),
+                    "print_readiness": readiness,
+                    "verification_path": str(verification_path),
+                },
+            )
+        else:
+            await JobStateManager.set_state(
+                job_id, "needs_review",
+                extra={
+                    "confidence": str(confidence),
+                    "print_readiness": readiness,
+                    "verification_path": str(verification_path),
+                },
+            )
+
+        final_status = "done" if confidence >= AUTO_APPROVE_THRESHOLD else "needs_review"
+
+        logger.info(
+            f"Job {job_id}: fix orchestration complete — "
+            f"{result.iterations} iterations, "
+            f"{result.total_fixes_applied} fixes applied, "
+            f"converged={result.converged}, "
+            f"confidence={confidence:.1f}, "
+            f"status={final_status}"
+        )
+
+        return {
+            "job_id": job_id,
+            "status": final_status,
+            "iterations": result.iterations,
+            "fixes_applied": result.total_fixes_applied,
+            "converged": result.converged,
+            "confidence": confidence,
+            "print_readiness": readiness,
+        }
+
+    except Exception as exc:
+        logger.error(f"Job {job_id} fix orchestration failed: {exc}")
+        await JobStateManager.set_state(job_id, "failed", error=str(exc))
+        raise
+
+
 @broker.task(task_name="ingest_document")
 async def ingest_document(job_id: str, file_path: str, original_filename: str) -> dict:
     """
@@ -177,6 +266,22 @@ async def diagnose_document(job_id: str) -> dict:
             f"{diagnosis.summary.total_issues} issues found "
             f"({diagnosis.summary.critical_count} critical)"
         )
+
+        # Auto-enqueue fix orchestration if issues were found
+        if diagnosis.summary.total_issues > 0:
+            await fix_document.kiq(job_id=job_id)
+        else:
+            # No issues — skip fixing, mark as done
+            await JobStateManager.set_state(
+                job_id, "fixing",
+                extra={"issues_found": "0"},
+            )
+            await JobStateManager.set_state(
+                job_id, "verifying",
+                extra={"confidence": "100.0"},
+            )
+            await JobStateManager.set_state(job_id, "done")
+
         return {
             "job_id": job_id,
             "status": "diagnosed",

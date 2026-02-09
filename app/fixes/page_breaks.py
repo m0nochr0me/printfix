@@ -21,7 +21,9 @@ async def fix_page_breaks(
     if strategy == "remove_all":
         return await remove_manual_breaks(file_path, job_id)
     return await asyncio.to_thread(
-        _remove_consecutive_breaks_sync, file_path, job_id,
+        _remove_consecutive_breaks_sync,
+        file_path,
+        job_id,
     )
 
 

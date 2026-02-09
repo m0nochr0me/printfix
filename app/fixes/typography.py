@@ -18,12 +18,19 @@ async def replace_font(
 ) -> FixResult:
     """Replace all occurrences of a font with another in a DOCX."""
     return await asyncio.to_thread(
-        _replace_font_sync, file_path, job_id, from_font, to_font,
+        _replace_font_sync,
+        file_path,
+        job_id,
+        from_font,
+        to_font,
     )
 
 
 def _replace_font_sync(
-    file_path: str, job_id: str, from_font: str, to_font: str,
+    file_path: str,
+    job_id: str,
+    from_font: str,
+    to_font: str,
 ) -> FixResult:
     from docx import Document
 
@@ -66,13 +73,19 @@ async def adjust_font_size(
 ) -> FixResult:
     """Clamp all font sizes to a min/max range in a DOCX."""
     return await asyncio.to_thread(
-        _adjust_font_size_sync, file_path, job_id, min_size_pt, max_size_pt,
+        _adjust_font_size_sync,
+        file_path,
+        job_id,
+        min_size_pt,
+        max_size_pt,
     )
 
 
 def _adjust_font_size_sync(
-    file_path: str, job_id: str,
-    min_size_pt: float | None, max_size_pt: float | None,
+    file_path: str,
+    job_id: str,
+    min_size_pt: float | None,
+    max_size_pt: float | None,
 ) -> FixResult:
     from docx import Document
     from docx.shared import Pt

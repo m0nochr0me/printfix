@@ -333,16 +333,16 @@ printfix/
 - [x] Page break fixes
 
 ### Phase 4 — Orchestration
-- [ ] AI agent fix loop (diagnose → fix → re-render → re-diagnose)
-- [ ] Smart Auto aggressiveness mode
-- [ ] Claude integration for thorough-effort orchestration
-- [ ] Iteration cap and convergence detection
+- [x] AI agent fix loop (diagnose → fix → re-render → re-diagnose)
+- [x] Smart Auto aggressiveness mode
+- [x] Claude integration for thorough-effort orchestration
+- [x] Iteration cap and convergence detection
 
 ### Phase 5 — Verification & Delivery
-- [ ] Before/after rendering and comparison
-- [ ] AI confidence scoring
-- [ ] Fix report generation
-- [ ] Download endpoint (fixed original + PDF)
+- [x] Before/after rendering and comparison
+- [x] AI confidence scoring
+- [x] Fix report generation
+- [x] Download endpoint (fixed original + PDF)
 
 ### Phase 6 — PDF Fallbacks
 - [ ] PDF margin/crop adjustments

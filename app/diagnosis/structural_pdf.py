@@ -203,7 +203,7 @@ def _check_colorspaces(pdf: pikepdf.Pdf) -> list[DiagnosisIssue]:
         xobjects = resources.get("/XObject")
         if xobjects:
             try:
-                for _, xobj_ref in dict(xobjects).items():
+                for xobj_ref in dict(xobjects).values():
                     xobj = xobj_ref
                     if xobj.get("/Subtype") != "/Image":
                         continue

@@ -1,4 +1,4 @@
-"""AI prompt templates for document diagnosis."""
+"""AI prompt templates for document diagnosis and fix orchestration."""
 
 VISUAL_INSPECTION_PROMPT = """\
 You are a professional print quality inspector. Analyze the provided document \
@@ -129,4 +129,109 @@ Respond with ONLY valid JSON:
     }}
   ]
 }}
+"""
+
+FIX_PLANNING_PROMPT = """\
+You are a document fix orchestrator for a print-readiness system. Given a \
+diagnosis of print quality issues, select the appropriate fix tools and \
+parameters to resolve them.
+
+**Document context:**
+- File type: {file_type}
+- Target page size: {target_page_size}
+- Aggressiveness: {aggressiveness}
+
+**Available fix tools:**
+
+For DOCX documents:
+- set_margins(top, bottom, left, right) — Set margins in inches on all sections
+- set_page_size(width, height) — Set page size in inches (A4=8.27x11.69, Letter=8.5x11)
+- set_orientation(orientation) — Set "portrait" or "landscape"
+- remove_blank_pages() — Remove consecutive page breaks creating blank pages
+- replace_font(from_font, to_font) — Replace all occurrences of a font
+- adjust_font_size(min_size_pt, max_size_pt) — Clamp font sizes to range in points
+- auto_fit_tables() — Auto-fit all tables to page width
+- resize_table_text(table_index, max_font_size_pt) — Reduce font in a specific table
+- fix_page_breaks(strategy) — Fix breaks: "remove_consecutive" or "remove_all"
+- remove_manual_breaks() — Remove all manual page breaks
+
+For PDF documents (fallback):
+- pdf_crop_margins(top, bottom, left, right) — Adjust CropBox in inches inset
+- pdf_scale_content(scale_factor) — Scale content (0.9 = shrink to 90%)
+- pdf_rotate_pages(pages, angle) — Rotate pages (angle: 0/90/180/270, pages: 1-indexed list or null for all)
+
+**Aggressiveness guide:**
+- "conservative": Only fix critical issues. Avoid changes that alter content appearance.
+- "moderate": Fix critical and warning issues. Be cautious with content-affecting changes.
+- "aggressive": Fix all issues including info-level. Apply all available improvements.
+- "smart_auto": Decide per issue — use aggressive for safe structural changes \
+(margins, page size, orientation, blank pages), conservative for content-affecting \
+changes (font substitution, table restructuring), and skip issues where the fix \
+risks making things worse. Explain your reasoning for each decision.
+
+**Diagnosis:**
+{diagnosis_json}
+
+Respond with ONLY valid JSON:
+
+{{
+  "actions": [
+    {{
+      "tool_name": "<tool name from list above>",
+      "params": {{<parameter key-value pairs>}},
+      "target_issues": ["<issue_type being addressed>", ...],
+      "reasoning": "<why this fix and these parameters>"
+    }}
+  ],
+  "skipped_issues": [
+    {{
+      "type": "<issue_type>",
+      "reason": "<why skipped>"
+    }}
+  ]
+}}
+
+Rules:
+- Order actions so that structural changes (margins, page size) come before \
+content changes (fonts, tables)
+- Do NOT apply the same tool twice with identical parameters
+- Only use tools that match the document type (DOCX tools for .docx, PDF tools for .pdf)
+- If an issue has no viable fix tool, skip it with an explanation
+"""
+
+VERIFICATION_PROMPT = """\
+You are a professional print quality inspector performing a final quality check.
+
+You have been shown BEFORE and AFTER images of document pages that were \
+automatically fixed for print readiness. Compare them and assess the overall \
+print quality of the AFTER versions.
+
+For each page pair, evaluate:
+1. Has the content been preserved? (text, images, tables all intact)
+2. Are the margins and spacing now appropriate for printing?
+3. Is text legible and properly sized?
+4. Are tables and images properly contained within page boundaries?
+5. Has the overall layout improved or at least not degraded?
+
+Respond with ONLY valid JSON:
+
+{{
+  "overall_score": <0-100 integer>,
+  "page_assessments": [
+    {{
+      "page": <page_number>,
+      "score": <0-100>,
+      "improved": true | false,
+      "notes": "<brief assessment>"
+    }}
+  ],
+  "summary": "<one-sentence overall quality summary>"
+}}
+
+Scoring guide:
+- 90-100: Excellent print quality, all issues resolved, no degradation
+- 70-89: Good quality, most issues fixed, minor concerns remain
+- 50-69: Acceptable but noticeable issues persist
+- 30-49: Poor quality, significant issues remain or fixes introduced new problems
+- 0-29: Fixes made the document worse or content was lost
 """

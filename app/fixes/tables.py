@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from xml.etree import ElementTree
+
+from lxml import etree  # type: ignore
 
 from app.core.log import logger
 from app.schema.fix import FixResult
@@ -48,19 +49,19 @@ def _auto_fit_tables_sync(file_path: str, job_id: str) -> FixResult:
         # Set table width to 100% of page width
         tbl_pr = tbl.find(f"{{{_WP_NS}}}tblPr")
         if tbl_pr is None:
-            tbl_pr = ElementTree.SubElement(tbl, f"{{{_WP_NS}}}tblPr")
+            tbl_pr = etree.SubElement(tbl, f"{{{_WP_NS}}}tblPr")
 
         # Set preferred width to page width
         tbl_w = tbl_pr.find(f"{{{_WP_NS}}}tblW")
         if tbl_w is None:
-            tbl_w = ElementTree.SubElement(tbl_pr, f"{{{_WP_NS}}}tblW")
+            tbl_w = etree.SubElement(tbl_pr, f"{{{_WP_NS}}}tblW")
         tbl_w.set(f"{{{_WP_NS}}}w", str(int(printable_width)))
         tbl_w.set(f"{{{_WP_NS}}}type", "dxa")
 
         # Set autofit layout
         tbl_layout = tbl_pr.find(f"{{{_WP_NS}}}tblLayout")
         if tbl_layout is None:
-            tbl_layout = ElementTree.SubElement(tbl_pr, f"{{{_WP_NS}}}tblLayout")
+            tbl_layout = etree.SubElement(tbl_pr, f"{{{_WP_NS}}}tblLayout")
         tbl_layout.set(f"{{{_WP_NS}}}type", "autofit")
 
         # Scale column widths proportionally to fit
@@ -109,13 +110,19 @@ async def resize_table_text(
 ) -> FixResult:
     """Reduce font size in a specific table's cells (0-indexed)."""
     return await asyncio.to_thread(
-        _resize_table_text_sync, file_path, job_id, table_index, max_font_size_pt,
+        _resize_table_text_sync,
+        file_path,
+        job_id,
+        table_index,
+        max_font_size_pt,
     )
 
 
 def _resize_table_text_sync(
-    file_path: str, job_id: str,
-    table_index: int, max_font_size_pt: float,
+    file_path: str,
+    job_id: str,
+    table_index: int,
+    max_font_size_pt: float,
 ) -> FixResult:
     from docx import Document
     from docx.shared import Pt

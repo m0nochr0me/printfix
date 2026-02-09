@@ -24,13 +24,23 @@ async def pdf_crop_margins(
 ) -> FixResult:
     """Adjust CropBox on all pages. Values in inches inset from MediaBox edges."""
     return await asyncio.to_thread(
-        _pdf_crop_margins_sync, pdf_path, job_id, top, bottom, left, right,
+        _pdf_crop_margins_sync,
+        pdf_path,
+        job_id,
+        top,
+        bottom,
+        left,
+        right,
     )
 
 
 def _pdf_crop_margins_sync(
-    pdf_path: str, job_id: str,
-    top: float, bottom: float, left: float, right: float,
+    pdf_path: str,
+    job_id: str,
+    top: float,
+    bottom: float,
+    left: float,
+    right: float,
 ) -> FixResult:
     with pikepdf.open(pdf_path, allow_overwriting_input=True) as pdf:
         pages_affected = []
@@ -42,12 +52,7 @@ def _pdf_crop_margins_sync(
             y1 = float(mb[3]) - top * _PT_PER_INCH
 
             if x1 > x0 and y1 > y0:
-                page["/CropBox"] = pikepdf.Array([
-                    pikepdf.Decimal(str(x0)),
-                    pikepdf.Decimal(str(y0)),
-                    pikepdf.Decimal(str(x1)),
-                    pikepdf.Decimal(str(y1)),
-                ])
+                page["/CropBox"] = pikepdf.Array([x0, y0, x1, y1])
                 pages_affected.append(i)
 
         pdf.save(pdf_path)
@@ -56,9 +61,9 @@ def _pdf_crop_margins_sync(
         tool_name="pdf_crop_margins",
         job_id=job_id,
         success=True,
-        description=f"Set CropBox margins (T={top}\" B={bottom}\" L={left}\" R={right}\") on {len(pages_affected)} page(s)",
+        description=f'Set CropBox margins (T={top}" B={bottom}" L={left}" R={right}") on {len(pages_affected)} page(s)',
         pages_affected=pages_affected,
-        after_value=f"T={top}\" B={bottom}\" L={left}\" R={right}\"",
+        after_value=f'T={top}" B={bottom}" L={left}" R={right}"',
     )
 
 
@@ -69,12 +74,17 @@ async def pdf_scale_content(
 ) -> FixResult:
     """Scale all page content by a factor (e.g. 0.9 = shrink to 90%)."""
     return await asyncio.to_thread(
-        _pdf_scale_content_sync, pdf_path, job_id, scale_factor,
+        _pdf_scale_content_sync,
+        pdf_path,
+        job_id,
+        scale_factor,
     )
 
 
 def _pdf_scale_content_sync(
-    pdf_path: str, job_id: str, scale_factor: float,
+    pdf_path: str,
+    job_id: str,
+    scale_factor: float,
 ) -> FixResult:
     with pikepdf.open(pdf_path, allow_overwriting_input=True) as pdf:
         pages_affected = []
@@ -98,18 +108,13 @@ def _pdf_scale_content_sync(
             # Read existing content
             if isinstance(contents, pikepdf.Array):
                 old_data = b""
-                for stream in contents:
+                for stream in contents: # type: ignore
                     old_data += pikepdf.Stream(pdf, stream).read_bytes()
             else:
                 old_data = contents.read_bytes()
 
             # Prepend the transform
-            new_data = (
-                b"q\n"
-                + transform.encode()
-                + old_data
-                + b"\nQ\n"
-            )
+            new_data = b"q\n" + transform.encode() + old_data + b"\nQ\n"
             page["/Contents"] = pdf.make_stream(new_data)
             pages_affected.append(i)
 
@@ -119,9 +124,9 @@ def _pdf_scale_content_sync(
         tool_name="pdf_scale_content",
         job_id=job_id,
         success=True,
-        description=f"Scaled content to {scale_factor*100:.0f}% on {len(pages_affected)} page(s)",
+        description=f"Scaled content to {scale_factor * 100:.0f}% on {len(pages_affected)} page(s)",
         pages_affected=pages_affected,
-        after_value=f"{scale_factor*100:.0f}%",
+        after_value=f"{scale_factor * 100:.0f}%",
     )
 
 
@@ -141,13 +146,19 @@ async def pdf_rotate_pages(
             error="Invalid angle",
         )
     return await asyncio.to_thread(
-        _pdf_rotate_pages_sync, pdf_path, job_id, pages, angle,
+        _pdf_rotate_pages_sync,
+        pdf_path,
+        job_id,
+        pages,
+        angle,
     )
 
 
 def _pdf_rotate_pages_sync(
-    pdf_path: str, job_id: str,
-    pages: list[int] | None, angle: int,
+    pdf_path: str,
+    job_id: str,
+    pages: list[int] | None,
+    angle: int,
 ) -> FixResult:
     with pikepdf.open(pdf_path, allow_overwriting_input=True) as pdf:
         pages_affected = []
@@ -157,7 +168,7 @@ def _pdf_rotate_pages_sync(
             if 1 <= page_num <= len(pdf.pages):
                 page = pdf.pages[page_num - 1]
                 current = int(page.get("/Rotate", 0))
-                page["/Rotate"] = pikepdf.Name(str((current + angle) % 360))
+                page["/Rotate"] = (current + angle) % 360
                 pages_affected.append(page_num)
 
         pdf.save(pdf_path)
