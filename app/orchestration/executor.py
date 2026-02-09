@@ -108,20 +108,30 @@ async def execute_fix(job_id: str, action: FixAction) -> FixResult:
 async def execute_plan(
     job_id: str,
     actions: list[FixAction],
-) -> tuple[int, int]:
+) -> tuple[int, int, set[str], bool]:
     """
     Execute all actions in a FixPlan sequentially.
-    Returns (applied_count, failed_count).
+
+    Returns (applied_count, failed_count, failed_issue_types, used_fallback).
+    ``failed_issue_types`` contains the ``target_issues`` of non-fallback
+    actions that failed — used by the orchestrator to trigger PDF fallback
+    in subsequent iterations.
     """
     applied = 0
     failed = 0
+    failed_issue_types: set[str] = set()
+    used_fallback = False
     for action in actions:
         result = await execute_fix(job_id, action)
         if result.success:
             applied += 1
+            if action.is_fallback:
+                used_fallback = True
         else:
             failed += 1
-    return applied, failed
+            if not action.is_fallback:
+                failed_issue_types.update(action.target_issues)
+    return applied, failed, failed_issue_types, used_fallback
 
 
 async def _get_pdf_path(job_id: str) -> str:

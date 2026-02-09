@@ -16,6 +16,7 @@ class FixAction(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     target_issues: list[str] = Field(default_factory=list)
     reasoning: str = ""
+    is_fallback: bool = False  # True when this is a PDF fallback for an editable doc
 
 
 class FixPlan(BaseModel):
@@ -39,6 +40,7 @@ class ConvergenceState(BaseModel):
     warning_after: int = 0
     fixes_applied: int
     fixes_failed: int
+    used_fallback: bool = False  # True if PDF fallback tools were used this iteration
 
 
 class OrchestrationResult(BaseModel):
@@ -53,6 +55,7 @@ class OrchestrationResult(BaseModel):
     initial_critical: int = 0
     final_critical: int = 0
     converged: bool = False
+    used_fallback: bool = False  # True if any PDF fallback tools were used
     stop_reason: str = ""
 
 

@@ -65,6 +65,11 @@ async def run_fix_loop(job_id: str) -> OrchestrationResult:
     convergence_history: list[ConvergenceState] = []
     total_applied = 0
     total_failed = 0
+    any_fallback_used = False
+
+    # Accumulated set of issue types whose DOCX fixes failed across iterations.
+    # Passed to the planner so it can route these to PDF fallback tools.
+    cumulative_failed_issue_types: set[str] = set()
 
     for iteration in range(1, effort_config.max_fix_iterations + 1):
         issues_before = diagnosis.summary.total_issues
@@ -74,9 +79,14 @@ async def run_fix_loop(job_id: str) -> OrchestrationResult:
         logger.info(
             f"Job {job_id}: iteration {iteration}/{effort_config.max_fix_iterations} — "
             f"{issues_before} issues ({critical_before} critical)"
+            + (
+                f", fallback candidates: {cumulative_failed_issue_types}"
+                if cumulative_failed_issue_types
+                else ""
+            )
         )
 
-        # 1. Plan fixes
+        # 1. Plan fixes (pass failed issue types for PDF fallback routing)
         plan = await plan_fixes(
             diagnosis=diagnosis,
             aggressiveness=aggressiveness,
@@ -84,6 +94,7 @@ async def run_fix_loop(job_id: str) -> OrchestrationResult:
             effort_config=effort_config,
             target_page_size=target_page_size,
             iteration=iteration,
+            failed_issue_types=cumulative_failed_issue_types,
         )
 
         if not plan.actions:
@@ -102,19 +113,28 @@ async def run_fix_loop(job_id: str) -> OrchestrationResult:
             convergence_history.append(state)
             break
 
+        has_fallback_actions = any(a.is_fallback for a in plan.actions)
+
         logger.info(
-            f"Job {job_id}: planned {len(plan.actions)} fixes, "
+            f"Job {job_id}: planned {len(plan.actions)} fixes"
+            f"{' (includes PDF fallbacks)' if has_fallback_actions else ''}, "
             f"skipped {len(plan.skipped_issues)} issues"
         )
 
         # 2. Execute fixes
-        applied, failed = await execute_plan(job_id, plan.actions)
+        applied, failed, iter_failed_issues, iter_used_fallback = await execute_plan(
+            job_id, plan.actions,
+        )
         total_applied += applied
         total_failed += failed
+        cumulative_failed_issue_types.update(iter_failed_issues)
+        if iter_used_fallback:
+            any_fallback_used = True
 
         logger.info(
             f"Job {job_id}: iteration {iteration} — "
             f"{applied} applied, {failed} failed"
+            + (f", used PDF fallback" if iter_used_fallback else "")
         )
 
         # 3. Re-diagnose to evaluate remaining issues
@@ -135,11 +155,19 @@ async def run_fix_loop(job_id: str) -> OrchestrationResult:
             warning_after=warning_after,
             fixes_applied=applied,
             fixes_failed=failed,
+            used_fallback=iter_used_fallback,
         )
         convergence_history.append(state)
 
-        # 5. Check stopping condition
-        stop, reason = should_stop(convergence_history, effort_config.max_fix_iterations)
+        # 5. Check stopping condition (with fallback awareness)
+        fallback_available = _has_untried_fallback(
+            cumulative_failed_issue_types, convergence_history, file_type,
+        )
+        stop, reason = should_stop(
+            convergence_history,
+            effort_config.max_fix_iterations,
+            fallback_available=fallback_available,
+        )
         if stop:
             logger.info(f"Job {job_id}: stopping — {reason}")
             break
@@ -161,6 +189,7 @@ async def run_fix_loop(job_id: str) -> OrchestrationResult:
         initial_critical=initial_critical,
         final_critical=final_critical,
         converged=converged,
+        used_fallback=any_fallback_used,
         stop_reason=convergence_history[-1].iteration >= effort_config.max_fix_iterations
         and not converged
         and "max iterations reached"
@@ -176,9 +205,39 @@ async def run_fix_loop(job_id: str) -> OrchestrationResult:
         f"{total_applied} fixes applied, "
         f"{initial_issues} → {final_issues} issues, "
         f"converged={converged}"
+        + (", used PDF fallback" if any_fallback_used else "")
     )
 
     return result
+
+
+def _has_untried_fallback(
+    failed_issue_types: set[str],
+    convergence_history: list[ConvergenceState],
+    file_type: str,
+) -> bool:
+    """
+    Check if there are untried PDF fallback tools available.
+
+    Returns True if:
+    - The document is an editable format (DOCX, etc.)
+    - There are failed issue types that have PDF fallback mappings
+    - No iteration has yet used fallback tools
+    """
+    from app.orchestration.planner import _DOCX_TO_PDF_FALLBACK, _is_editable_format
+
+    if not _is_editable_format(file_type):
+        return False
+
+    if not failed_issue_types:
+        return False
+
+    # Check if any previous iteration already used fallback
+    if any(s.used_fallback for s in convergence_history):
+        return False
+
+    # Check if any failed issue type has a PDF fallback available
+    return bool(failed_issue_types & set(_DOCX_TO_PDF_FALLBACK.keys()))
 
 
 async def _load_diagnosis(job_id: str) -> DocumentDiagnosis:

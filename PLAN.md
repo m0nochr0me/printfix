@@ -345,10 +345,10 @@ printfix/
 - [x] Download endpoint (fixed original + PDF)
 
 ### Phase 6 — PDF Fallbacks
-- [ ] PDF margin/crop adjustments
-- [ ] PDF content scaling
-- [ ] PDF page rotation
-- [ ] Fallback routing when original-format fixes fail
+- [x] PDF margin/crop adjustments
+- [x] PDF content scaling
+- [x] PDF page rotation
+- [x] Fallback routing when original-format fixes fail
 
 ### Phase 7 — Hardening
 - [ ] Image colorspace conversion (RGB → CMYK)

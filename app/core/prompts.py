@@ -180,7 +180,8 @@ Respond with ONLY valid JSON:
       "tool_name": "<tool name from list above>",
       "params": {{<parameter key-value pairs>}},
       "target_issues": ["<issue_type being addressed>", ...],
-      "reasoning": "<why this fix and these parameters>"
+      "reasoning": "<why this fix and these parameters>",
+      "is_fallback": false
     }}
   ],
   "skipped_issues": [
@@ -195,7 +196,11 @@ Rules:
 - Order actions so that structural changes (margins, page size) come before \
 content changes (fonts, tables)
 - Do NOT apply the same tool twice with identical parameters
-- Only use tools that match the document type (DOCX tools for .docx, PDF tools for .pdf)
+- For DOCX documents, prefer DOCX tools first. Only use PDF fallback tools \
+when DOCX tools have already failed for a given issue type (see "Fallback \
+context" below if present). When using a PDF fallback tool for a DOCX \
+document, set is_fallback=true in the action.
+- For PDF documents, use PDF tools directly (these are NOT fallbacks).
 - If an issue has no viable fix tool, skip it with an explanation
 """
 

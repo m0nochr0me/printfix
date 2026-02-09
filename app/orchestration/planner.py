@@ -127,6 +127,67 @@ _DOCX_ISSUE_MAP: dict[str, list[FixAction]] = {
     ],
 }
 
+# ── DOCX→PDF fallback mapping ────────────────────────────────────────
+# When a DOCX fix fails for a given issue type, these PDF alternatives
+# are tried on the reference PDF instead.
+
+_DOCX_TO_PDF_FALLBACK: dict[str, list[FixAction]] = {
+    "margin_violation": [
+        FixAction(
+            tool_name="pdf_crop_margins",
+            params={"top": 0.25, "bottom": 0.25, "left": 0.25, "right": 0.25},
+            target_issues=["margin_violation"],
+            reasoning="DOCX margin fix failed; adjusting PDF crop box as fallback",
+            is_fallback=True,
+        ),
+    ],
+    "inconsistent_margins": [
+        FixAction(
+            tool_name="pdf_crop_margins",
+            params={"top": 0.25, "bottom": 0.25, "left": 0.25, "right": 0.25},
+            target_issues=["inconsistent_margins"],
+            reasoning="DOCX margin normalization failed; using PDF crop box fallback",
+            is_fallback=True,
+        ),
+    ],
+    "clipped_content": [
+        FixAction(
+            tool_name="pdf_scale_content",
+            params={"scale_factor": 0.9},
+            target_issues=["clipped_content"],
+            reasoning="DOCX fixes didn't resolve clipping; scaling PDF content as fallback",
+            is_fallback=True,
+        ),
+    ],
+    "text_overflow": [
+        FixAction(
+            tool_name="pdf_scale_content",
+            params={"scale_factor": 0.92},
+            target_issues=["text_overflow"],
+            reasoning="DOCX fixes didn't resolve overflow; scaling PDF content as fallback",
+            is_fallback=True,
+        ),
+    ],
+    "table_overflow": [
+        FixAction(
+            tool_name="pdf_scale_content",
+            params={"scale_factor": 0.85},
+            target_issues=["table_overflow"],
+            reasoning="DOCX table fixes failed; scaling PDF content as fallback",
+            is_fallback=True,
+        ),
+    ],
+    "wrong_orientation": [
+        FixAction(
+            tool_name="pdf_rotate_pages",
+            params={"pages": None, "angle": 90},
+            target_issues=["wrong_orientation"],
+            reasoning="DOCX orientation fix failed; rotating PDF pages as fallback",
+            is_fallback=True,
+        ),
+    ],
+}
+
 _PDF_ISSUE_MAP: dict[str, list[FixAction]] = {
     "margin_violation": [
         FixAction(
@@ -204,18 +265,30 @@ def _collect_issues(diagnosis: DocumentDiagnosis) -> list[DiagnosisIssue]:
     return issues
 
 
+def _is_editable_format(file_type: str) -> bool:
+    """Check if a file type supports original-format editing (DOCX tools)."""
+    return file_type in (".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp")
+
+
 def plan_fixes_rule_based(
     diagnosis: DocumentDiagnosis,
     aggressiveness: str,
     file_type: str,
     target_page_size: str | None = None,
     iteration: int = 1,
+    failed_issue_types: set[str] | None = None,
 ) -> FixPlan:
     """
     Deterministic fix planning: map issue types to tool calls with defaults.
     Filters by aggressiveness and deduplicates tool calls.
+
+    When ``failed_issue_types`` is provided and the document is an editable
+    format, issues in that set are routed to PDF fallback tools instead of
+    the primary DOCX tools.
     """
-    issue_map = _DOCX_ISSUE_MAP if file_type == ".docx" else _PDF_ISSUE_MAP
+    is_editable = _is_editable_format(file_type)
+    issue_map = _DOCX_ISSUE_MAP if is_editable else _PDF_ISSUE_MAP
+    failed_issue_types = failed_issue_types or set()
     all_issues = _collect_issues(diagnosis)
 
     seen_tools: set[str] = set()  # (tool_name, params_key) for dedup
@@ -229,14 +302,35 @@ def plan_fixes_rule_based(
             skipped.append(f"{issue_type} (severity {issue.severity} below threshold)")
             continue
 
-        # Use suggested_fix from diagnosis if available and in our map
-        lookup_key = issue.suggested_fix if issue.suggested_fix in issue_map else issue_type
+        # If this issue type already failed with DOCX tools, try PDF fallback
+        use_fallback = (
+            is_editable
+            and issue_type in failed_issue_types
+            and issue_type in _DOCX_TO_PDF_FALLBACK
+        )
 
-        if lookup_key not in issue_map:
-            skipped.append(f"{issue_type} (no fix available)")
-            continue
+        if use_fallback:
+            active_map = _DOCX_TO_PDF_FALLBACK
+            lookup_key = issue_type
+        else:
+            active_map = issue_map
+            # Use suggested_fix from diagnosis if available and in our map
+            lookup_key = (
+                issue.suggested_fix
+                if issue.suggested_fix in active_map
+                else issue_type
+            )
 
-        for template in issue_map[lookup_key]:
+        if lookup_key not in active_map:
+            # Last resort: try PDF fallback for editable formats
+            if is_editable and issue_type in _DOCX_TO_PDF_FALLBACK:
+                active_map = _DOCX_TO_PDF_FALLBACK
+                lookup_key = issue_type
+            else:
+                skipped.append(f"{issue_type} (no fix available)")
+                continue
+
+        for template in active_map[lookup_key]:
             action = template.model_copy()
 
             # Customize params based on context
@@ -255,13 +349,18 @@ def plan_fixes_rule_based(
             seen_tools.add(dedup_key)
             actions.append(action)
 
-    # Sort: structural changes first, then content changes
+    # Sort: structural changes first, then content changes;
+    # within structural, non-fallback before fallback
     structural_tools = {
         "set_margins", "set_page_size", "set_orientation",
         "remove_blank_pages", "fix_page_breaks", "remove_manual_breaks",
         "pdf_crop_margins", "pdf_scale_content", "pdf_rotate_pages",
     }
-    actions.sort(key=lambda a: (0 if a.tool_name in structural_tools else 1, a.tool_name))
+    actions.sort(key=lambda a: (
+        0 if a.tool_name in structural_tools else 1,
+        1 if a.is_fallback else 0,
+        a.tool_name,
+    ))
 
     return FixPlan(
         job_id=diagnosis.job_id,
@@ -278,6 +377,7 @@ async def plan_fixes_ai(
     effort_config: EffortConfig,
     target_page_size: str | None = None,
     iteration: int = 1,
+    failed_issue_types: set[str] | None = None,
 ) -> FixPlan:
     """
     AI-driven fix planning: send diagnosis to Gemini or Claude to get a fix plan.
@@ -285,13 +385,26 @@ async def plan_fixes_ai(
     """
     from app.core.prompts import FIX_PLANNING_PROMPT
 
+    failed_issue_types = failed_issue_types or set()
+
+    # Build fallback context for the prompt
+    fallback_context = ""
+    if failed_issue_types and _is_editable_format(file_type):
+        fallback_context = (
+            f"\n\n**Fallback context:** The following issue types failed to resolve "
+            f"with {file_type.upper()} tools in previous iterations: "
+            f"{', '.join(sorted(failed_issue_types))}. "
+            f"You SHOULD use PDF fallback tools for these issues instead. "
+            f"Mark these actions with is_fallback=true."
+        )
+
     diagnosis_json = diagnosis.model_dump_json(indent=2)
     prompt = FIX_PLANNING_PROMPT.format(
         file_type=file_type,
         target_page_size=target_page_size or "original",
         aggressiveness=aggressiveness,
         diagnosis_json=diagnosis_json,
-    )
+    ) + fallback_context
 
     try:
         raw_text = await _call_planning_model(prompt, effort_config)
@@ -303,6 +416,7 @@ async def plan_fixes_ai(
         )
         return plan_fixes_rule_based(
             diagnosis, aggressiveness, file_type, target_page_size, iteration,
+            failed_issue_types=failed_issue_types,
         )
 
 
@@ -357,13 +471,16 @@ def _parse_ai_plan(raw_text: str, job_id: str, iteration: int) -> FixPlan:
     """Parse structured JSON from AI response into a FixPlan."""
     data = json.loads(raw_text)
 
+    pdf_tools = {"pdf_crop_margins", "pdf_scale_content", "pdf_rotate_pages"}
     actions: list[FixAction] = []
     for item in data.get("actions", []):
+        tool = item["tool_name"]
         actions.append(FixAction(
-            tool_name=item["tool_name"],
+            tool_name=tool,
             params=item.get("params", {}),
             target_issues=item.get("target_issues", []),
             reasoning=item.get("reasoning", ""),
+            is_fallback=item.get("is_fallback", tool in pdf_tools),
         ))
 
     skipped: list[str] = []
@@ -387,11 +504,15 @@ async def plan_fixes(
     effort_config: EffortConfig,
     target_page_size: str | None = None,
     iteration: int = 1,
+    failed_issue_types: set[str] | None = None,
 ) -> FixPlan:
     """
     Entry point: choose rule-based or AI planning based on effort + aggressiveness.
     Smart Auto at any effort level triggers AI planning.
     Thorough effort always uses AI planning.
+
+    ``failed_issue_types`` contains issue types whose DOCX fixes failed in
+    prior iterations, triggering PDF fallback routing for those issues.
     """
     use_ai = effort_config.use_ai_planning or aggressiveness == "smart_auto"
 
@@ -399,8 +520,10 @@ async def plan_fixes(
         return await plan_fixes_ai(
             diagnosis, aggressiveness, file_type, effort_config,
             target_page_size, iteration,
+            failed_issue_types=failed_issue_types,
         )
 
     return plan_fixes_rule_based(
         diagnosis, aggressiveness, file_type, target_page_size, iteration,
+        failed_issue_types=failed_issue_types,
     )
