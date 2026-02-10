@@ -9,6 +9,8 @@ from time import perf_counter
 
 from asgi_correlation_id import CorrelationIdMiddleware
 from fastapi import FastAPI, Request, Response
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from fastmcp import FastMCP
 from fastmcp.server.auth.providers.debug import DebugTokenVerifier
 from ulid import ULID
@@ -17,12 +19,16 @@ from app.api.printfix import router as printfix_router
 from app.context.printfix import server as printfix_server
 from app.core.config import settings
 from app.core.log import logger
-from app.schema.status import HealthCheckResponse, IndexResponse
+from app.schema.status import HealthCheckResponse
+from app.util.base_dir import get_module_root
 from app.worker.broker import broker as taskiq_broker
 from app.worker.job_state import JobStateManager
 
 exec_id = ULID()
 start_time = perf_counter()
+
+base_dir = get_module_root("app")
+templates = Jinja2Templates(directory=str(base_dir / "templates"))
 
 verifier = DebugTokenVerifier(
     validate=lambda token: secrets.compare_digest(token, settings.APP_AUTH_KEY),
@@ -61,7 +67,9 @@ async def lifespan(app: FastAPI):
     async with mcp_app.lifespan(app):
         logger.info(f"Starting up {settings.PROJECT_NAME} v{settings.PROJECT_VERSION}")
         logger.info(f"Debug mode: {settings.DEBUG}")
-        logger.info(f"Listening on: {settings.APP_HOST}:{settings.APP_PORT} - Workers: {settings.APP_WORKERS}")
+        logger.info(
+            f"Listening on: {settings.APP_HOST}:{settings.APP_PORT} - Workers: {settings.APP_WORKERS}"
+        )
         logger.info(f"Exec ID: {exec_id}")
 
         if not taskiq_broker.is_worker_process:
@@ -170,5 +178,31 @@ async def health(request: Request, response: Response) -> HealthCheckResponse:
     "/",
     include_in_schema=False,
 )
-async def index() -> IndexResponse:
-    return IndexResponse()
+async def index(request: Request):
+    return templates.TemplateResponse(
+        "index.html.j2",
+        {
+            "request": request,
+            "subtitle": "Dashboard",
+            "version": settings.PROJECT_VERSION,
+        },
+    )
+
+
+@app.get(
+    "/jobs/{job_id}",
+    include_in_schema=False,
+)
+async def job_detail(request: Request, job_id: str):
+    return templates.TemplateResponse(
+        "job.html.j2",
+        {
+            "request": request,
+            "subtitle": "Job Detail",
+            "version": settings.PROJECT_VERSION,
+            "job_id": job_id,
+        },
+    )
+
+
+app.mount("/static", StaticFiles(directory=base_dir / "static"), name="static")

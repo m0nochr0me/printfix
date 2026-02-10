@@ -23,7 +23,7 @@ class EffortConfig:
 
 EFFORT_CONFIGS: dict[EffortLevel, EffortConfig] = {
     EffortLevel.quick: EffortConfig(
-        visual_model="gemini-2.0-flash-lite",
+        visual_model="gemini-3-flash-preview",
         use_claude_structural=False,
         claude_model=None,
         max_pages_sampled=10,
@@ -31,10 +31,10 @@ EFFORT_CONFIGS: dict[EffortLevel, EffortConfig] = {
         use_ai_merge=False,
         max_fix_iterations=1,
         use_ai_planning=False,
-        orchestration_model="gemini-2.0-flash-lite",
+        orchestration_model="gemini-3-flash-preview",
     ),
     EffortLevel.standard: EffortConfig(
-        visual_model="gemini-2.0-flash",
+        visual_model="gemini-3-flash-preview",
         use_claude_structural=False,
         claude_model=None,
         max_pages_sampled=None,
@@ -42,10 +42,10 @@ EFFORT_CONFIGS: dict[EffortLevel, EffortConfig] = {
         use_ai_merge=False,
         max_fix_iterations=3,
         use_ai_planning=False,
-        orchestration_model="gemini-2.0-flash",
+        orchestration_model="gemini-3-pro-preview",
     ),
     EffortLevel.thorough: EffortConfig(
-        visual_model="gemini-2.0-flash",
+        visual_model="gemini-3-pro-preview",
         use_claude_structural=True,
         claude_model=None,  # resolved at runtime from settings
         max_pages_sampled=None,

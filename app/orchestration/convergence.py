@@ -52,14 +52,25 @@ def should_stop(
 
     # 5. Issue count stalled or worsened (compare to previous iteration)
     #    UNLESS PDF fallback tools are available to try next
+    #    Focus on critical+warning count rather than total issues to avoid
+    #    stopping due to info-level issues being discovered during re-diagnosis
     if len(states) >= 2:
         prev = states[-2]
-        if current.issues_after >= prev.issues_after:
-            if fallback_available:
-                return False, ""
-            return True, (
-                f"issues did not decrease "
-                f"({prev.issues_after} → {current.issues_after})"
-            )
+        prev_important = prev.critical_after + prev.warning_after
+        curr_important = current.critical_after + current.warning_after
+
+        # If critical+warning issues didn't decrease, consider stopping
+        if curr_important >= prev_important:
+            # Allow small total issue increases if important issues decreased
+            total_increased = current.issues_after > prev.issues_after
+            important_decreased = curr_important < prev_important
+
+            if total_increased and not important_decreased:
+                if fallback_available:
+                    return False, ""
+                return True, (
+                    f"important issues did not decrease "
+                    f"(C+W: {prev_important} → {curr_important})"
+                )
 
     return False, ""

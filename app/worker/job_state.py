@@ -113,3 +113,15 @@ class JobStateManager:
     async def delete_job(cls, job_id: str) -> bool:
         r = await cls.get_redis()
         return bool(await r.delete(cls._key(job_id)))
+
+    @classmethod
+    async def list_jobs(cls, limit: int = 100) -> list[dict]:
+        """List recent jobs, sorted by creation time descending."""
+        r = await cls.get_redis()
+        jobs: list[dict] = []
+        async for key in r.scan_iter(match="printfix:job:*", count=200):
+            data = await r.hgetall(key)
+            if data:
+                jobs.append(dict(data))
+        jobs.sort(key=lambda j: j.get("created_at", ""), reverse=True)
+        return jobs[:limit]

@@ -10,11 +10,18 @@ For each page, check for these problems:
 3. **orphan_widow** — single lines stranded at top/bottom of a page
 4. **misaligned_elements** — headers, columns, or images not properly aligned
 5. **image_overflow** — images crossing page boundaries or extending beyond margins
+   - Critical: Large images (>20% of page) with significant clipping (>10% cut off)
+   - Warning: Medium images (5-20% of page) with moderate overflow
+   - Info: Small decorative images (<5% of page) slightly near margins
 6. **text_overflow** — text overlapping other elements or running outside bounds
 7. **small_font** — text that would be unreadably small when printed (< 8pt)
 8. **wrong_orientation** — page orientation doesn't match the content layout
 9. **blank_page** — empty or near-empty pages (accidental page breaks)
 10. **visual_inconsistency** — mixed fonts, erratic spacing, or style mismatches
+
+IMPORTANT: When assessing image_overflow, estimate the image size relative to the page and \
+the severity of clipping. Small logos or decorative elements near margins are typically \
+'info' level unless they are clearly cut off.
 
 Respond with ONLY valid JSON. Use this exact structure:
 
@@ -152,8 +159,17 @@ For DOCX documents:
 - adjust_font_size(min_size_pt, max_size_pt) — Clamp font sizes to range in points
 - auto_fit_tables() — Auto-fit all tables to page width
 - resize_table_text(table_index, max_font_size_pt) — Reduce font in a specific table
+- resize_images_to_fit(max_width_pct, max_height_pct) — Proportionally resize images \
+that exceed the printable area (default: 100% width, 90% height). Preserves aspect ratio.
 - fix_page_breaks(strategy) — Fix breaks: "remove_consecutive" or "remove_all"
 - remove_manual_breaks() — Remove all manual page breaks
+
+For XLSX documents:
+- set_xlsx_margins(top, bottom, left, right) — Set print margins in inches
+- set_xlsx_page_setup(orientation, paper_size, fit_to_page) — Page setup (1=Letter, 9=A4)
+- auto_fit_xlsx_columns(max_col_width, min_col_width, shrink_margins) — Auto-size columns \
+to fit within a single page width, auto-selects orientation, tightens margins, and enables \
+fit-to-page. Use when columns overflow onto additional pages.
 
 For PDF documents (fallback):
 - pdf_crop_margins(top, bottom, left, right) — Adjust CropBox in inches inset

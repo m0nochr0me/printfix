@@ -1,0 +1,774 @@
+{% extends "base.html.j2" %}
+
+{% block head_extra %}
+<script>
+window.JOB_ID = "{{ job_id }}";
+window.extraSetup = function(Vue, { apiKey, hasKey }) {
+    const { ref, computed, onMounted, onUnmounted, watch } = Vue;
+
+    const jobId = window.JOB_ID;
+    const loading = ref(true);
+    const error = ref('');
+    const job = ref(null);
+    const diagnosis = ref(null);
+    const fixes = ref(null);
+    const orchestration = ref(null);
+    const verification = ref(null);
+    const activeTab = ref('overview');
+    const currentPage = ref(1);
+    const beforeImage = ref(null);
+    const afterImage = ref(null);
+    const loadingImages = ref(false);
+    const actionLoading = ref('');
+    let pollTimer = null;
+
+    const authHeaders = () => ({
+        'Authorization': `Bearer ${apiKey.value}`
+    });
+
+    const isProcessing = computed(() => {
+        const s = job.value?.status;
+        return ['uploaded','ingesting','converting','rendering','diagnosing','fixing','verifying'].includes(s);
+    });
+    const isDone = computed(() => ['done','needs_review','failed'].includes(job.value?.status));
+    const totalPages = computed(() => job.value?.pages || 0);
+
+    /* ── Data fetching ────────────────────────── */
+
+    const fetchJob = async () => {
+        if (!hasKey.value) return;
+        try {
+            const res = await fetch(`/v1/jobs/${jobId}`, { headers: authHeaders() });
+            if (res.ok) { job.value = await res.json(); error.value = ''; }
+            else if (res.status === 404) error.value = 'Job not found';
+        } catch (e) { error.value = 'Failed to load job'; }
+        finally { loading.value = false; }
+    };
+
+    const fetchDiagnosis = async () => {
+        if (!hasKey.value) return;
+        try {
+            const res = await fetch(`/v1/jobs/${jobId}/diagnosis`, { headers: authHeaders() });
+            if (res.ok) diagnosis.value = await res.json();
+        } catch (e) {}
+    };
+
+    const fetchFixes = async () => {
+        if (!hasKey.value) return;
+        try {
+            const res = await fetch(`/v1/jobs/${jobId}/fixes`, { headers: authHeaders() });
+            if (res.ok) fixes.value = await res.json();
+        } catch (e) {}
+    };
+
+    const fetchOrchestration = async () => {
+        if (!hasKey.value) return;
+        try {
+            const res = await fetch(`/v1/jobs/${jobId}/orchestration`, { headers: authHeaders() });
+            if (res.ok) orchestration.value = await res.json();
+        } catch (e) {}
+    };
+
+    const fetchVerification = async () => {
+        if (!hasKey.value) return;
+        try {
+            const res = await fetch(`/v1/jobs/${jobId}/verification`, { headers: authHeaders() });
+            if (res.ok) verification.value = await res.json();
+        } catch (e) {}
+    };
+
+    /* ── Preview images (fetched as blobs for auth) ── */
+
+    const loadPageImages = async () => {
+        if (!totalPages.value) return;
+        loadingImages.value = true;
+        if (beforeImage.value) URL.revokeObjectURL(beforeImage.value);
+        if (afterImage.value) URL.revokeObjectURL(afterImage.value);
+        beforeImage.value = null;
+        afterImage.value = null;
+        try {
+            const [bRes, aRes] = await Promise.allSettled([
+                fetch(`/v1/jobs/${jobId}/preview/before/${currentPage.value}`, { headers: authHeaders() }),
+                fetch(`/v1/jobs/${jobId}/preview/after/${currentPage.value}`, { headers: authHeaders() }),
+            ]);
+            if (bRes.status === 'fulfilled' && bRes.value.ok) {
+                beforeImage.value = URL.createObjectURL(await bRes.value.blob());
+            }
+            if (aRes.status === 'fulfilled' && aRes.value.ok) {
+                afterImage.value = URL.createObjectURL(await aRes.value.blob());
+            }
+        } catch (e) {}
+        finally { loadingImages.value = false; }
+    };
+
+    /* ── Tab switching ────────────────────────── */
+
+    const setTab = (tab) => {
+        activeTab.value = tab;
+        if (tab === 'diagnosis' && !diagnosis.value) fetchDiagnosis();
+        if (tab === 'fixes' && !fixes.value) { fetchFixes(); fetchOrchestration(); }
+        if (tab === 'preview') loadPageImages();
+        if (tab === 'report' && !verification.value) fetchVerification();
+    };
+
+    const prevPage = () => { if (currentPage.value > 1) { currentPage.value--; loadPageImages(); } };
+    const nextPage = () => { if (currentPage.value < totalPages.value) { currentPage.value++; loadPageImages(); } };
+
+    /* ── Actions ──────────────────────────────── */
+
+    const downloadFile = async (format) => {
+        actionLoading.value = 'download';
+        try {
+            const res = await fetch(`/v1/jobs/${jobId}/download?format=${format}`, { headers: authHeaders() });
+            if (!res.ok) return;
+            const blob = await res.blob();
+            const cd = res.headers.get('content-disposition');
+            let filename = 'download';
+            if (cd) { const m = cd.match(/filename="?([^"]+)"?/); if (m) filename = m[1]; }
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = filename;
+            document.body.appendChild(a); a.click();
+            document.body.removeChild(a); URL.revokeObjectURL(url);
+        } catch (e) { console.error('Download failed:', e); }
+        finally { actionLoading.value = ''; }
+    };
+
+    const approveJob = async () => {
+        actionLoading.value = 'approve';
+        try {
+            const res = await fetch(`/v1/jobs/${jobId}/approve`, { method: 'POST', headers: authHeaders() });
+            if (res.ok) await fetchJob();
+        } catch (e) {} finally { actionLoading.value = ''; }
+    };
+
+    const rejectJob = async () => {
+        actionLoading.value = 'reject';
+        try {
+            const res = await fetch(`/v1/jobs/${jobId}/reject`, { method: 'POST', headers: authHeaders() });
+            if (res.ok) await fetchJob();
+        } catch (e) {} finally { actionLoading.value = ''; }
+    };
+
+    const reDiagnose = async () => {
+        actionLoading.value = 'diagnose';
+        try {
+            const res = await fetch(`/v1/jobs/${jobId}/diagnose`, { method: 'POST', headers: authHeaders() });
+            if (res.ok) { diagnosis.value = null; await fetchJob(); startPolling(); }
+        } catch (e) {} finally { actionLoading.value = ''; }
+    };
+
+    const reFix = async () => {
+        actionLoading.value = 'fix';
+        try {
+            const res = await fetch(`/v1/jobs/${jobId}/fix`, { method: 'POST', headers: authHeaders() });
+            if (res.ok) {
+                fixes.value = null; orchestration.value = null; verification.value = null;
+                await fetchJob(); startPolling();
+            }
+        } catch (e) {} finally { actionLoading.value = ''; }
+    };
+
+    /* ── Helpers ──────────────────────────────── */
+
+    const statusColor = (s) => ({
+        done: 'bg-green-500', failed: 'bg-red-500', needs_review: 'bg-yellow-500',
+        fixing: 'bg-blue-400', diagnosing: 'bg-blue-400', verifying: 'bg-blue-400',
+        uploaded: 'bg-gray-400', ingesting: 'bg-gray-400', converting: 'bg-gray-400',
+        rendering: 'bg-gray-400', ingested: 'bg-gray-400', diagnosed: 'bg-indigo-400',
+    }[s] || 'bg-gray-400');
+
+    const statusTextColor = (s) => ({
+        done: 'text-green-400', failed: 'text-red-400', needs_review: 'text-yellow-400',
+        fixing: 'text-blue-400', diagnosing: 'text-blue-400', verifying: 'text-blue-400',
+        diagnosed: 'text-indigo-400',
+    }[s] || 'text-gray-400');
+
+    const statusLabel = (s) => ({
+        uploaded: 'Uploaded', ingesting: 'Ingesting', converting: 'Converting',
+        rendering: 'Rendering', ingested: 'Ready', diagnosing: 'Diagnosing',
+        diagnosed: 'Diagnosed', fixing: 'Fixing', verifying: 'Verifying',
+        done: 'Done', needs_review: 'Needs Review', failed: 'Failed',
+    }[s] || s);
+
+    const severityColor = (s) => ({
+        critical: 'text-red-400 bg-red-900/30 border-red-800/50',
+        warning: 'text-yellow-400 bg-yellow-900/30 border-yellow-800/50',
+        info: 'text-blue-400 bg-blue-900/30 border-blue-800/50',
+    }[s] || 'text-gray-400 bg-gray-900/30 border-gray-800/50');
+
+    const severityBadge = (s) => ({
+        critical: 'bg-red-500/20 text-red-400',
+        warning: 'bg-yellow-500/20 text-yellow-400',
+        info: 'bg-blue-500/20 text-blue-400',
+    }[s] || 'bg-gray-500/20 text-gray-400');
+
+    const formatDate = (d) => d ? new Date(d).toLocaleString() : '-';
+
+    const confidenceColor = (c) => {
+        if (c >= 90) return 'text-green-400';
+        if (c >= 70) return 'text-yellow-400';
+        if (c >= 50) return 'text-orange-400';
+        return 'text-red-400';
+    };
+
+    const confidenceBarColor = (c) => {
+        if (c >= 90) return 'bg-green-500';
+        if (c >= 70) return 'bg-yellow-500';
+        if (c >= 50) return 'bg-orange-500';
+        return 'bg-red-500';
+    };
+
+    const actionResultColor = (a) => ({
+        fixed: 'text-green-400', skipped: 'text-gray-500',
+        failed: 'text-red-400', not_applicable: 'text-blue-400',
+    }[a] || 'text-gray-400');
+
+    const actionResultIcon = (a) => ({
+        fixed: '✓', skipped: '—', failed: '✗', not_applicable: '○',
+    }[a] || '?');
+
+    /* ── Lifecycle ────────────────────────────── */
+
+    const startPolling = () => {
+        if (pollTimer) clearInterval(pollTimer);
+        pollTimer = setInterval(async () => {
+            await fetchJob();
+            if (!isProcessing.value && pollTimer) {
+                clearInterval(pollTimer);
+                pollTimer = null;
+                fetchDiagnosis();
+                fetchOrchestration();
+                fetchVerification();
+            }
+        }, 3000);
+    };
+
+    onMounted(async () => {
+        await fetchJob();
+        if (isProcessing.value) startPolling();
+        else {
+            // Eagerly load available data for completed jobs
+            fetchDiagnosis();
+            fetchOrchestration();
+            fetchVerification();
+        }
+    });
+
+    onUnmounted(() => {
+        if (pollTimer) clearInterval(pollTimer);
+        if (beforeImage.value) URL.revokeObjectURL(beforeImage.value);
+        if (afterImage.value) URL.revokeObjectURL(afterImage.value);
+    });
+
+    return {
+        jobId, loading, error, job, diagnosis, fixes, orchestration, verification,
+        activeTab, currentPage, beforeImage, afterImage, loadingImages, actionLoading,
+        isProcessing, isDone, totalPages,
+        fetchJob, setTab, prevPage, nextPage, loadPageImages,
+        downloadFile, approveJob, rejectJob, reDiagnose, reFix,
+        statusColor, statusTextColor, statusLabel,
+        severityColor, severityBadge, formatDate,
+        confidenceColor, confidenceBarColor,
+        actionResultColor, actionResultIcon,
+    };
+};
+</script>
+{% endblock %}
+
+{% block content %}
+<!-- Loading State -->
+<div v-if="loading" class="flex items-center justify-center py-20">
+    <svg class="w-8 h-8 animate-spin text-blue-400" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+    </svg>
+</div>
+
+<!-- Error State -->
+<div v-else-if="error" class="text-center py-20">
+    <svg class="w-16 h-16 mx-auto mb-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+              d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/>
+    </svg>
+    <p class="text-red-400 text-lg mb-4">${ error }</p>
+    <a href="/" class="text-blue-400 hover:underline">&larr; Back to Dashboard</a>
+</div>
+
+<!-- Job Detail -->
+<div v-else-if="job" class="max-w-6xl mx-auto">
+    <!-- Back Link -->
+    <a href="/" class="text-gray-400 hover:text-white text-sm mb-4 inline-flex items-center gap-1 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+        </svg>
+        Dashboard
+    </a>
+
+    <!-- ═══════ Header Card ═══════ -->
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-6">
+        <div class="flex items-start justify-between flex-wrap gap-4">
+            <div class="min-w-0">
+                <h2 class="text-xl font-semibold text-white flex items-center gap-3 flex-wrap">
+                    <span class="truncate">${ job.original_filename }</span>
+                    <span :class="statusColor(job.status)"
+                          class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium text-white whitespace-nowrap">
+                        <span v-if="isProcessing" class="w-1.5 h-1.5 bg-white rounded-full mr-1.5 animate-pulse"></span>
+                        ${ statusLabel(job.status) }
+                    </span>
+                </h2>
+                <p class="text-gray-400 text-sm mt-1 font-mono">${ job.id }</p>
+                <p class="text-gray-500 text-xs mt-1">
+                    <span v-if="job.file_type">${ job.file_type }</span>
+                    <span v-if="job.pages"> &middot; ${ job.pages } pages</span>
+                    &middot; Created ${ formatDate(job.created_at) }
+                    <span v-if="job.completed_at"> &middot; Completed ${ formatDate(job.completed_at) }</span>
+                </p>
+            </div>
+            <!-- Confidence Score -->
+            <div v-if="job.confidence" class="text-right flex-shrink-0">
+                <p :class="confidenceColor(job.confidence)" class="text-4xl font-bold">${ Math.round(job.confidence) }%</p>
+                <p class="text-gray-500 text-xs mt-1 capitalize">${ (job.print_readiness || 'confidence').replace(/_/g, ' ') }</p>
+                <div class="w-36 h-2 bg-gray-700 rounded-full mt-2 overflow-hidden">
+                    <div :class="confidenceBarColor(job.confidence)"
+                         :style="{ width: Math.min(job.confidence, 100) + '%' }"
+                         class="h-full rounded-full transition-all duration-700"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Stats -->
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mt-6 pt-6 border-t border-gray-800">
+            <div>
+                <p class="text-gray-500 text-xs uppercase tracking-wide">Effort</p>
+                <p class="text-white mt-1 capitalize">${ job.effort }</p>
+            </div>
+            <div>
+                <p class="text-gray-500 text-xs uppercase tracking-wide">Aggressiveness</p>
+                <p class="text-white mt-1 capitalize">${ job.aggressiveness?.replace(/_/g, ' ') }</p>
+            </div>
+            <div>
+                <p class="text-gray-500 text-xs uppercase tracking-wide">Issues Found</p>
+                <p class="text-white mt-1">${ job.issues_found }</p>
+            </div>
+            <div>
+                <p class="text-gray-500 text-xs uppercase tracking-wide">Fixed</p>
+                <p class="text-green-400 mt-1">${ job.issues_fixed }</p>
+            </div>
+            <div>
+                <p class="text-gray-500 text-xs uppercase tracking-wide">Skipped</p>
+                <p class="text-gray-400 mt-1">${ job.issues_skipped }</p>
+            </div>
+        </div>
+
+        <!-- Error -->
+        <div v-if="job.status === 'failed' && job.error" class="mt-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+            <p class="text-red-400 text-sm font-medium">Error</p>
+            <p class="text-red-300 text-sm mt-1">${ job.error }</p>
+        </div>
+
+        <!-- Processing Indicator -->
+        <div v-if="isProcessing" class="mt-4 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg flex items-center gap-3">
+            <svg class="w-5 h-5 animate-spin text-blue-400 flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
+            <p class="text-blue-400 text-sm">Processing &mdash; ${ statusLabel(job.status) }. Auto-refreshing every 3s.</p>
+        </div>
+    </div>
+
+    <!-- ═══════ Tab Navigation ═══════ -->
+    <div class="flex border-b border-gray-800 mb-6 overflow-x-auto">
+        <button v-for="tab in ['overview', 'diagnosis', 'preview', 'report']" :key="tab"
+                @click="setTab(tab)"
+                :class="activeTab === tab ? 'border-blue-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'"
+                class="px-5 py-3 text-sm font-medium border-b-2 transition-colors capitalize whitespace-nowrap">
+            ${ tab }
+        </button>
+    </div>
+
+    <!-- ═══════ Overview Tab ═══════ -->
+    <div v-show="activeTab === 'overview'">
+        <!-- Action Buttons -->
+        <div class="flex flex-wrap gap-3 mb-6">
+            <button v-if="['done','needs_review'].includes(job.status)" @click="downloadFile('pdf')"
+                    :disabled="actionLoading === 'download'"
+                    class="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors inline-flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+                Download PDF
+            </button>
+            <button v-if="['done','needs_review'].includes(job.status) && job.file_type && job.file_type !== '.pdf'"
+                    @click="downloadFile('original')"
+                    :disabled="actionLoading === 'download'"
+                    class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors">
+                Download Original Format
+            </button>
+            <button v-if="['needs_review','verifying'].includes(job.status)" @click="approveJob"
+                    :disabled="!!actionLoading"
+                    class="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors">
+                Approve
+            </button>
+            <button v-if="['done','needs_review','verifying'].includes(job.status)" @click="rejectJob"
+                    :disabled="!!actionLoading"
+                    class="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors">
+                Reject
+            </button>
+            <button v-if="['ingested','diagnosed'].includes(job.status)" @click="reDiagnose"
+                    :disabled="!!actionLoading"
+                    class="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors">
+                Re-diagnose
+            </button>
+            <button v-if="['diagnosed','needs_review'].includes(job.status)" @click="reFix"
+                    :disabled="!!actionLoading"
+                    class="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors">
+                Start Fix
+            </button>
+        </div>
+
+        <!-- Orchestration Summary -->
+        <div v-if="orchestration?.result" class="bg-gray-900 border border-gray-800 rounded-lg p-5 mb-6">
+            <h3 class="text-sm font-medium text-gray-400 uppercase tracking-wide mb-4">Orchestration Summary</h3>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
+                    <p class="text-xl font-bold text-white">${ orchestration.result.iterations }</p>
+                    <p class="text-gray-500 text-xs">Iterations</p>
+                </div>
+                <div>
+                    <p class="text-xl font-bold text-green-400">${ orchestration.result.total_fixes_applied }</p>
+                    <p class="text-gray-500 text-xs">Fixes Applied</p>
+                </div>
+                <div>
+                    <p class="text-xl font-bold text-red-400">${ orchestration.result.total_fixes_failed }</p>
+                    <p class="text-gray-500 text-xs">Fixes Failed</p>
+                </div>
+                <div>
+                    <p class="text-xl font-bold" :class="orchestration.result.converged ? 'text-green-400' : 'text-yellow-400'">
+                        ${ orchestration.result.converged ? 'Yes' : 'No' }
+                    </p>
+                    <p class="text-gray-500 text-xs">Converged</p>
+                </div>
+            </div>
+            <div class="mt-4 pt-4 border-t border-gray-800 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div>
+                    <span class="text-gray-500">Initial Issues:</span>
+                    <span class="text-white ml-2">${ orchestration.result.initial_issues }</span>
+                </div>
+                <div>
+                    <span class="text-gray-500">Final Issues:</span>
+                    <span class="text-white ml-2">${ orchestration.result.final_issues }</span>
+                </div>
+                <div>
+                    <span class="text-gray-500">Used Fallback:</span>
+                    <span class="text-white ml-2">${ orchestration.result.used_fallback ? 'Yes' : 'No' }</span>
+                </div>
+                <div v-if="orchestration.result.stop_reason">
+                    <span class="text-gray-500">Stop Reason:</span>
+                    <span class="text-white ml-2 capitalize">${ orchestration.result.stop_reason.replace(/_/g, ' ') }</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Confidence Breakdown -->
+        <div v-if="verification?.verification?.confidence" class="bg-gray-900 border border-gray-800 rounded-lg p-5">
+            <h3 class="text-sm font-medium text-gray-400 uppercase tracking-wide mb-4">Confidence Breakdown</h3>
+            <div class="space-y-3">
+                <div class="flex justify-between items-center text-sm">
+                    <span class="text-gray-400">Base Score</span>
+                    <span class="text-white font-medium">${ verification.verification.confidence.base_score?.toFixed(1) }</span>
+                </div>
+                <div class="flex justify-between items-center text-sm">
+                    <span class="text-gray-400">Visual Score</span>
+                    <span class="text-white font-medium">${ verification.verification.confidence.visual_score?.toFixed(1) }
+                        <span class="text-gray-600 text-xs">(weight: ${ verification.verification.confidence.visual_weight })</span>
+                    </span>
+                </div>
+                <div class="flex justify-between items-center text-sm">
+                    <span class="text-gray-400">Convergence Bonus</span>
+                    <span :class="verification.verification.confidence.convergence_bonus >= 0 ? 'text-green-400' : 'text-red-400'" class="font-medium">
+                        ${ verification.verification.confidence.convergence_bonus >= 0 ? '+' : '' }${ verification.verification.confidence.convergence_bonus?.toFixed(1) }
+                    </span>
+                </div>
+                <div class="flex justify-between items-center text-sm">
+                    <span class="text-gray-400">Severity Penalty</span>
+                    <span class="text-red-400 font-medium">${ verification.verification.confidence.severity_penalty?.toFixed(1) }</span>
+                </div>
+                <div class="pt-3 border-t border-gray-800 flex justify-between items-center">
+                    <span class="text-white font-medium">Final Score</span>
+                    <span :class="confidenceColor(verification.verification.confidence.final_score)" class="text-xl font-bold">
+                        ${ verification.verification.confidence.final_score?.toFixed(1) }%
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════ Diagnosis Tab ═══════ -->
+    <div v-show="activeTab === 'diagnosis'">
+        <!-- Loading / Not Available -->
+        <div v-if="!diagnosis" class="text-center py-16 text-gray-500">
+            <div v-if="['uploaded','ingesting','converting','rendering','ingested'].includes(job.status)">
+                <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                          d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <p>Diagnosis not yet available. Current status: <span :class="statusTextColor(job.status)">${ statusLabel(job.status) }</span></p>
+            </div>
+            <div v-else-if="job.status === 'diagnosing'" class="flex flex-col items-center gap-3">
+                <svg class="w-8 h-8 animate-spin text-blue-400" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                </svg>
+                <p>Diagnosis in progress...</p>
+            </div>
+            <div v-else>
+                <svg class="w-8 h-8 animate-spin text-gray-600 mx-auto mb-3" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                </svg>
+                <p>Loading diagnosis data...</p>
+            </div>
+        </div>
+
+        <div v-else-if="diagnosis.diagnosis">
+            <!-- Summary Card -->
+            <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 mb-6">
+                <h3 class="text-sm font-medium text-gray-400 uppercase tracking-wide mb-4">Diagnosis Summary</h3>
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+                    <div>
+                        <p class="text-2xl font-bold text-white">${ diagnosis.diagnosis.summary?.total_issues || 0 }</p>
+                        <p class="text-gray-500 text-xs">Total Issues</p>
+                    </div>
+                    <div>
+                        <p class="text-2xl font-bold text-red-400">${ diagnosis.diagnosis.summary?.critical_count || 0 }</p>
+                        <p class="text-gray-500 text-xs">Critical</p>
+                    </div>
+                    <div>
+                        <p class="text-2xl font-bold text-yellow-400">${ diagnosis.diagnosis.summary?.warning_count || 0 }</p>
+                        <p class="text-gray-500 text-xs">Warnings</p>
+                    </div>
+                    <div>
+                        <p class="text-2xl font-bold text-blue-400">${ diagnosis.diagnosis.summary?.info_count || 0 }</p>
+                        <p class="text-gray-500 text-xs">Info</p>
+                    </div>
+                    <div>
+                        <p class="text-lg font-medium text-white capitalize">${ (diagnosis.diagnosis.summary?.print_readiness || '-').replace(/_/g, ' ') }</p>
+                        <p class="text-gray-500 text-xs">Print Readiness</p>
+                    </div>
+                </div>
+                <!-- Top Issues -->
+                <div v-if="diagnosis.diagnosis.summary?.top_issues?.length" class="mt-4 pt-4 border-t border-gray-800">
+                    <p class="text-gray-500 text-xs uppercase tracking-wide mb-2">Top Issues</p>
+                    <div class="flex flex-wrap gap-2">
+                        <span v-for="issue in diagnosis.diagnosis.summary.top_issues" :key="issue"
+                              class="bg-gray-800 text-gray-300 text-xs px-2 py-1 rounded capitalize">
+                            ${ issue.replace(/_/g, ' ') }
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Issues by Page -->
+            <div v-for="pageDiag in diagnosis.diagnosis.pages" :key="pageDiag.page" class="mb-6">
+                <h3 class="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
+                    <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>
+                    </svg>
+                    Page ${ pageDiag.page }
+                    <span class="text-gray-600 text-xs">(${ pageDiag.issues?.length || 0 } issues)</span>
+                </h3>
+                <div v-if="pageDiag.issues?.length" class="space-y-2">
+                    <div v-for="(issue, i) in pageDiag.issues" :key="i"
+                         :class="severityColor(issue.severity)"
+                         class="p-3 rounded-lg border">
+                        <div class="flex items-start justify-between gap-2">
+                            <div>
+                                <p class="font-medium text-sm capitalize">
+                                    ${ issue.type?.replace(/_/g, ' ') }
+                                </p>
+                                <p class="text-sm opacity-80 mt-1">${ issue.description }</p>
+                                <p v-if="issue.location" class="text-xs opacity-60 mt-1">📍 ${ issue.location }</p>
+                                <p v-if="issue.suggested_fix" class="text-xs opacity-60 mt-1">💡 ${ issue.suggested_fix?.replace(/_/g, ' ') }</p>
+                            </div>
+                            <span :class="severityBadge(issue.severity)"
+                                  class="text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap capitalize">
+                                ${ issue.severity }
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                <p v-else class="text-gray-600 text-sm ml-6">No issues on this page</p>
+            </div>
+
+            <!-- Document-Level Issues -->
+            <div v-if="diagnosis.diagnosis.document_issues?.length" class="mb-6">
+                <h3 class="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
+                    <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                    </svg>
+                    Document-Level Issues
+                </h3>
+                <div class="space-y-2">
+                    <div v-for="(issue, i) in diagnosis.diagnosis.document_issues" :key="i"
+                         :class="severityColor(issue.severity)"
+                         class="p-3 rounded-lg border">
+                        <div class="flex items-start justify-between gap-2">
+                            <div>
+                                <p class="font-medium text-sm capitalize">${ issue.type?.replace(/_/g, ' ') }</p>
+                                <p class="text-sm opacity-80 mt-1">${ issue.description }</p>
+                            </div>
+                            <span :class="severityBadge(issue.severity)"
+                                  class="text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap capitalize">
+                                ${ issue.severity }
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════ Preview Tab ═══════ -->
+    <div v-show="activeTab === 'preview'">
+        <div v-if="!totalPages" class="text-center py-16 text-gray-500">
+            <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                      d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5a2.25 2.25 0 002.25-2.25V5.25a2.25 2.25 0 00-2.25-2.25H3.75a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 003.75 21z"/>
+            </svg>
+            <p>No page previews available yet</p>
+        </div>
+        <div v-else>
+            <!-- Page Navigation -->
+            <div class="flex items-center justify-center gap-4 mb-6">
+                <button @click="prevPage" :disabled="currentPage <= 1"
+                        class="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed rounded-md transition-colors text-sm">
+                    &larr; Previous
+                </button>
+                <span class="text-gray-400 text-sm font-medium tabular-nums">
+                    Page ${ currentPage } of ${ totalPages }
+                </span>
+                <button @click="nextPage" :disabled="currentPage >= totalPages"
+                        class="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed rounded-md transition-colors text-sm">
+                    Next &rarr;
+                </button>
+            </div>
+
+            <!-- Loading -->
+            <div v-if="loadingImages" class="flex justify-center py-16">
+                <svg class="w-8 h-8 animate-spin text-blue-400" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                </svg>
+            </div>
+
+            <!-- Before / After -->
+            <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <h3 class="text-sm font-medium text-gray-400 mb-2 text-center uppercase tracking-wide">Before</h3>
+                    <div class="bg-gray-900 border border-gray-800 rounded-lg p-3 flex items-center justify-center"
+                         style="min-height: 450px;">
+                        <img v-if="beforeImage" :src="beforeImage" class="max-w-full max-h-[600px] object-contain rounded shadow-lg" alt="Before fix">
+                        <p v-else class="text-gray-600 text-sm">No before image available</p>
+                    </div>
+                </div>
+                <div>
+                    <h3 class="text-sm font-medium text-gray-400 mb-2 text-center uppercase tracking-wide">After</h3>
+                    <div class="bg-gray-900 border border-gray-800 rounded-lg p-3 flex items-center justify-center"
+                         style="min-height: 450px;">
+                        <img v-if="afterImage" :src="afterImage" class="max-w-full max-h-[600px] object-contain rounded shadow-lg" alt="After fix">
+                        <p v-else class="text-gray-600 text-sm">No after image available</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════ Report Tab ═══════ -->
+    <div v-show="activeTab === 'report'">
+        <div v-if="!verification" class="text-center py-16 text-gray-500">
+            <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                      d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z"/>
+            </svg>
+            <p>Report not available yet</p>
+        </div>
+
+        <div v-else-if="verification.verification?.report">
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-6">
+                <!-- Report Header -->
+                <div class="mb-6">
+                    <h3 class="text-lg font-semibold text-white">Fix Report</h3>
+                    <p class="text-gray-400 text-sm mt-1">${ verification.verification.report.original_filename }</p>
+                    <p class="text-gray-600 text-xs mt-1">
+                        Effort: <span class="text-gray-400 capitalize">${ verification.verification.report.effort_level }</span>
+                        &middot; Aggressiveness: <span class="text-gray-400 capitalize">${ verification.verification.report.aggressiveness?.replace(/_/g, ' ') }</span>
+                        &middot; Iterations: <span class="text-gray-400">${ verification.verification.report.iterations }</span>
+                    </p>
+                </div>
+
+                <!-- Stats Grid -->
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6 p-4 bg-gray-800/50 rounded-lg">
+                    <div class="text-center">
+                        <p class="text-xl font-bold text-white">${ verification.verification.report.issues_found }</p>
+                        <p class="text-gray-500 text-xs">Found</p>
+                    </div>
+                    <div class="text-center">
+                        <p class="text-xl font-bold text-green-400">${ verification.verification.report.issues_fixed }</p>
+                        <p class="text-gray-500 text-xs">Fixed</p>
+                    </div>
+                    <div class="text-center">
+                        <p class="text-xl font-bold text-gray-400">${ verification.verification.report.issues_skipped }</p>
+                        <p class="text-gray-500 text-xs">Skipped</p>
+                    </div>
+                    <div class="text-center">
+                        <p class="text-xl font-bold text-yellow-400">${ verification.verification.report.issues_remaining }</p>
+                        <p class="text-gray-500 text-xs">Remaining</p>
+                    </div>
+                    <div class="text-center">
+                        <p class="text-xl font-bold" :class="confidenceColor(verification.verification.report.confidence)">
+                            ${ Math.round(verification.verification.report.confidence) }%
+                        </p>
+                        <p class="text-gray-500 text-xs">Confidence</p>
+                    </div>
+                </div>
+
+                <!-- Fix Entries -->
+                <div v-if="verification.verification.report.entries?.length" class="space-y-2 mb-6">
+                    <h4 class="text-sm font-medium text-gray-400 uppercase tracking-wide mb-3">Fix Details</h4>
+                    <div v-for="(entry, i) in verification.verification.report.entries" :key="i"
+                         class="p-3 bg-gray-800/30 rounded-lg border border-gray-800/50">
+                        <div class="flex items-center justify-between flex-wrap gap-2">
+                            <div class="flex items-center gap-2">
+                                <span :class="actionResultColor(entry.action_taken)" class="font-bold text-sm">
+                                    ${ actionResultIcon(entry.action_taken) }
+                                </span>
+                                <span class="text-sm text-white capitalize">${ entry.issue_type?.replace(/_/g, ' ') }</span>
+                                <span :class="severityBadge(entry.severity)"
+                                      class="text-xs px-1.5 py-0.5 rounded capitalize">${ entry.severity }</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span v-if="entry.tool_used" class="text-gray-600 text-xs font-mono">${ entry.tool_used }</span>
+                                <span :class="actionResultColor(entry.action_taken)" class="text-xs capitalize font-medium">
+                                    ${ entry.action_taken?.replace(/_/g, ' ') }
+                                </span>
+                            </div>
+                        </div>
+                        <p class="text-gray-400 text-sm mt-1">${ entry.description }</p>
+                        <p v-if="entry.details" class="text-gray-500 text-xs mt-1">${ entry.details }</p>
+                    </div>
+                </div>
+
+                <!-- Summary Text -->
+                <div v-if="verification.verification.report.summary" class="p-4 bg-gray-800/50 rounded-lg border border-gray-700/50">
+                    <h4 class="text-sm font-medium text-gray-400 mb-2">Summary</h4>
+                    <p class="text-gray-300 text-sm whitespace-pre-wrap leading-relaxed">${ verification.verification.report.summary }</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

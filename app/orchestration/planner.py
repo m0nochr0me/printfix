@@ -125,6 +125,14 @@ _DOCX_ISSUE_MAP: dict[str, list[FixAction]] = {
             reasoning="Replace non-embedded font with safe default",
         ),
     ],
+    "image_overflow": [
+        FixAction(
+            tool_name="resize_images_to_fit",
+            params={"max_width_pct": 100.0, "max_height_pct": 90.0},
+            target_issues=["image_overflow"],
+            reasoning="Proportionally resize images that exceed printable area",
+        ),
+    ],
 }
 
 # ── DOCX→PDF fallback mapping ────────────────────────────────────────
@@ -183,6 +191,15 @@ _DOCX_TO_PDF_FALLBACK: dict[str, list[FixAction]] = {
             params={"pages": None, "angle": 90},
             target_issues=["wrong_orientation"],
             reasoning="DOCX orientation fix failed; rotating PDF pages as fallback",
+            is_fallback=True,
+        ),
+    ],
+    "image_overflow": [
+        FixAction(
+            tool_name="pdf_scale_content",
+            params={"scale_factor": 0.9},
+            target_issues=["image_overflow"],
+            reasoning="DOCX margin adjustments didn't resolve image overflow; scaling PDF as fallback",
             is_fallback=True,
         ),
     ],
@@ -274,18 +291,18 @@ _XLSX_ISSUE_MAP: dict[str, list[FixAction]] = {
     ],
     "table_overflow": [
         FixAction(
-            tool_name="set_xlsx_page_setup",
-            params={"orientation": "landscape", "paper_size": 1, "fit_to_page": True},
+            tool_name="auto_fit_xlsx_columns",
+            params={"shrink_margins": True},
             target_issues=["table_overflow"],
-            reasoning="Switch to landscape with fit-to-page for wide content",
+            reasoning="Auto-fit columns, choose orientation, and enable fit-to-page for wide content",
         ),
     ],
     "wrong_orientation": [
         FixAction(
-            tool_name="set_xlsx_page_setup",
-            params={"orientation": "landscape", "paper_size": 1, "fit_to_page": False},
+            tool_name="auto_fit_xlsx_columns",
+            params={"shrink_margins": True},
             target_issues=["wrong_orientation"],
-            reasoning="Switch sheet orientation to landscape",
+            reasoning="Auto-fit columns with smart orientation selection for wide sheets",
         ),
     ],
 }
@@ -440,6 +457,8 @@ def plan_fixes_rule_based(
         "set_margins", "set_page_size", "set_orientation",
         "remove_blank_pages", "fix_page_breaks", "remove_manual_breaks",
         "pdf_crop_margins", "pdf_scale_content", "pdf_rotate_pages",
+        "set_xlsx_margins", "set_xlsx_page_setup", "auto_fit_xlsx_columns",
+        "resize_images_to_fit",
     }
     actions.sort(key=lambda a: (
         0 if a.tool_name in structural_tools else 1,
@@ -507,11 +526,11 @@ async def plan_fixes_ai(
 
 async def _call_planning_model(prompt: str, effort_config: EffortConfig) -> str:
     """Call the appropriate AI model for fix planning."""
-    # Thorough effort → Claude
-    if effort_config.use_ai_planning and effort_config.orchestration_model is None:
+    # Use Claude only if explicitly enabled in settings
+    if settings.USE_ANTHROPIC_AI and effort_config.use_ai_planning and effort_config.orchestration_model is None:
         return await _call_claude(prompt, effort_config)
 
-    # Otherwise → Gemini
+    # Default to Gemini
     return await _call_gemini(prompt, effort_config)
 
 
@@ -522,7 +541,7 @@ async def _call_gemini(prompt: str, effort_config: EffortConfig) -> str:
     from app.core.ai import ai_client
     from app.core.retry import with_retry
 
-    model = effort_config.orchestration_model or "gemini-2.0-flash"
+    model = effort_config.orchestration_model or "gemini-3-flash-preview"
 
     async def _do_call() -> str:
         resp = await asyncio.wait_for(
@@ -532,7 +551,7 @@ async def _call_gemini(prompt: str, effort_config: EffortConfig) -> str:
                 contents=prompt,
                 config=GenerateContentConfig(
                     response_mime_type="application/json",
-                    temperature=0.2,
+                    temperature=1.0,  # Recommended for Gemini 3
                 ),
             ),
             timeout=settings.AI_API_TIMEOUT_SECONDS,
@@ -554,21 +573,29 @@ async def _call_claude(prompt: str, effort_config: EffortConfig) -> str:
 
     client = get_anthropic_client()
     if not client:
-        raise RuntimeError("Anthropic client not configured")
+        raise RuntimeError(
+            "Anthropic client not configured but USE_ANTHROPIC_AI is True. "
+            "Set PFX_ANTHROPIC_API_KEY in .env or disable PFX_USE_ANTHROPIC_AI."
+        )
 
     model = effort_config.claude_model or settings.ANTHROPIC_DIAGNOSIS_MODEL
+    logger.debug(f"Calling Claude API with model: {model}")
 
     async def _do_call() -> str:
-        resp = await asyncio.wait_for(
-            asyncio.to_thread(
-                client.messages.create,
-                model=model,
-                max_tokens=4096,
-                messages=[{"role": "user", "content": prompt}],
-            ),
-            timeout=settings.AI_API_TIMEOUT_SECONDS,
-        )
-        return extract_anthropic_text(resp)
+        try:
+            resp = await asyncio.wait_for(
+                asyncio.to_thread(
+                    client.messages.create,
+                    model=model,
+                    max_tokens=4096,
+                    messages=[{"role": "user", "content": prompt}],
+                ),
+                timeout=settings.AI_API_TIMEOUT_SECONDS,
+            )
+            return extract_anthropic_text(resp)
+        except Exception as e:
+            logger.error(f"Claude API error: {type(e).__name__}: {e}")
+            raise
 
     return await with_retry(
         _do_call,

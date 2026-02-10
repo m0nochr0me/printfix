@@ -1,0 +1,41 @@
+i.icon {
+    display: inline-block;
+    width: 1.5em;
+    height: 1.5em;
+    background-size: contain;
+    background-repeat: no-repeat;
+    vertical-align: middle;
+}
+
+i.key {
+    background-image: url("../icons/key-1-outlined-rounded.svg");
+}
+
+i.menu {
+    background-image: url("../icons/menu-1-outlined-rounded.svg");
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+
+/* ── Smooth transitions ── */
+html { scroll-behavior: smooth; }
+
+/* ── Tabular numbers for counters ── */
+.tabular-nums { font-variant-numeric: tabular-nums; }
+
+/* ── Drop zone active animation ── */
+@keyframes border-pulse {
+    0%, 100% { border-color: rgba(59, 130, 246, 0.5); }
+    50% { border-color: rgba(59, 130, 246, 1); }
+}
+.drop-active { animation: border-pulse 1.5s ease-in-out infinite; }
+
+/* ── Selection style ── */
+::selection {
+    background: rgba(59, 130, 246, 0.3);
+    color: white;
+}

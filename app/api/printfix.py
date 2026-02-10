@@ -2,8 +2,10 @@
 REST API router — Job CRUD endpoints.
 """
 
+import asyncio
 import json
 from pathlib import Path
+from random import random
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
@@ -12,6 +14,8 @@ from ulid import ULID
 from app.api.deps import check_rate_limit, verify_token
 from app.core.config import settings
 from app.core.storage import delete_job_files, save_upload
+from app.schema.diagnosis import DiagnosisResponse
+from app.schema.fix import FixLog
 from app.schema.job import (
     Aggressiveness,
     ColorSpace,
@@ -22,8 +26,6 @@ from app.schema.job import (
     JobStatus,
     PageSize,
 )
-from app.schema.diagnosis import DiagnosisResponse
-from app.schema.fix import FixLog
 from app.schema.orchestration import OrchestrationResponse, OrchestrationResult
 from app.worker.job_state import JobStateManager
 from app.worker.tasks import diagnose_document, fix_document, ingest_document
@@ -35,6 +37,50 @@ router = APIRouter(
     tags=["jobs"],
     dependencies=[Depends(verify_token), Depends(check_rate_limit)],
 )
+
+
+
+@router.get("/auth", tags=["Management"])
+async def auth() -> dict[str, str]:
+    """
+    Simple authentication endpoint to verify API key validity.
+    """
+    await asyncio.sleep(2 + random() * 2)
+
+    return {"status": "authorized"}
+
+
+@router.get("/jobs")
+async def list_jobs() -> list[JobResponse]:
+    """List all jobs, sorted by creation time descending."""
+    raw_jobs = await JobStateManager.list_jobs()
+    results: list[JobResponse] = []
+    for j in raw_jobs:
+        try:
+            results.append(
+                JobResponse(
+                    id=j["id"],
+                    status=JobStatus(j["status"]),
+                    effort=EffortLevel(j.get("effort", "standard")),
+                    aggressiveness=Aggressiveness(j.get("aggressiveness", "smart_auto")),
+                    original_filename=j.get("original_filename", "unknown"),
+                    file_type=j.get("file_type"),
+                    file_size_bytes=int(j["file_size_bytes"]) if j.get("file_size_bytes") else None,
+                    pages=int(j["pages"]) if j.get("pages") else None,
+                    issues_found=int(j.get("issues_found", 0)),
+                    issues_fixed=int(j.get("issues_fixed", 0)),
+                    issues_skipped=int(j.get("issues_skipped", 0)),
+                    confidence=float(j["confidence"]) if j.get("confidence") else None,
+                    print_readiness=j.get("print_readiness"),
+                    created_at=j["created_at"],
+                    updated_at=j["updated_at"],
+                    completed_at=j.get("completed_at"),
+                    error=j.get("error"),
+                )
+            )
+        except (KeyError, ValueError):
+            continue
+    return results
 
 
 @router.post("/jobs", status_code=status.HTTP_202_ACCEPTED)

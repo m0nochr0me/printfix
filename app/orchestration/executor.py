@@ -18,10 +18,10 @@ from app.fixes.page_layout import (
     set_orientation,
     set_page_size,
 )
-from app.fixes.images import check_image_dpi, convert_pdf_colorspace
+from app.fixes.images import check_image_dpi, convert_pdf_colorspace, resize_images_to_fit
 from app.fixes.pdf_fallback import pdf_crop_margins, pdf_rotate_pages, pdf_scale_content
 from app.fixes.pptx import adjust_pptx_font_size, set_pptx_slide_size
-from app.fixes.xlsx import set_xlsx_margins, set_xlsx_page_setup
+from app.fixes.xlsx import auto_fit_xlsx_columns, set_xlsx_margins, set_xlsx_page_setup
 from app.fixes.tables import auto_fit_tables, resize_table_text
 from app.fixes.typography import adjust_font_size, replace_font
 from app.schema.fix import FixResult
@@ -57,6 +57,9 @@ TOOL_REGISTRY: dict[str, tuple[FixFunc, bool]] = {
     # XLSX tools
     "set_xlsx_margins": (set_xlsx_margins, False),
     "set_xlsx_page_setup": (set_xlsx_page_setup, False),
+    "auto_fit_xlsx_columns": (auto_fit_xlsx_columns, False),
+    # DOCX image tools
+    "resize_images_to_fit": (resize_images_to_fit, False),
     # PPTX tools
     "set_pptx_slide_size": (set_pptx_slide_size, False),
     "adjust_pptx_font_size": (adjust_pptx_font_size, False),

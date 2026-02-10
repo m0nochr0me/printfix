@@ -143,6 +143,12 @@ async def run_fix_loop(job_id: str) -> OrchestrationResult:
         issues_after = diagnosis.summary.total_issues
         critical_after = diagnosis.summary.critical_count
         warning_after = diagnosis.summary.warning_count
+        info_after = issues_after - critical_after - warning_after
+
+        logger.info(
+            f"Job {job_id}: after iteration {iteration} — "
+            f"{issues_after} total ({critical_after} critical, {warning_after} warning, {info_after} info)"
+        )
 
         # 4. Record convergence state
         state = ConvergenceState(
@@ -163,13 +169,20 @@ async def run_fix_loop(job_id: str) -> OrchestrationResult:
         fallback_available = _has_untried_fallback(
             cumulative_failed_issue_types, convergence_history, file_type,
         )
+        if fallback_available:
+            logger.info(
+                f"Job {job_id}: PDF fallback available for: {cumulative_failed_issue_types}"
+            )
         stop, reason = should_stop(
             convergence_history,
             effort_config.max_fix_iterations,
             fallback_available=fallback_available,
         )
         if stop:
-            logger.info(f"Job {job_id}: stopping — {reason}")
+            logger.info(
+                f"Job {job_id}: stopping — {reason}"
+                + (f" (fallback was available)" if fallback_available else "")
+            )
             break
 
     final_issues = diagnosis.summary.total_issues

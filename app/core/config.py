@@ -50,7 +50,8 @@ class Settings(BaseSettings):
 
     GOOGLE_API_KEY: str
 
-    # Anthropic (only needed for Thorough effort level)
+    # Anthropic (optional - only used if USE_ANTHROPIC_AI is True)
+    USE_ANTHROPIC_AI: bool = False
     ANTHROPIC_API_KEY: str | None = None
     ANTHROPIC_DIAGNOSIS_MODEL: str = "claude-sonnet-4-5-20250929"
 

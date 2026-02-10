@@ -377,3 +377,9 @@ printfix/
 - [x] Error handling, retries, timeouts
 - [x] API authentication and rate limiting
 - [x] Logging and observability
+
+### Phase 8 - Basic WEB UI
+
+- [x] Simple web frontend for file upload and job status tracking
+- [x] Display diagnosis summary, confidence score, fix report
+- [x] Preview before/after page images

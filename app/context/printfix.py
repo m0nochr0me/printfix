@@ -32,6 +32,9 @@ from app.fixes.images import (
 from app.fixes.images import (
     convert_pdf_colorspace as _convert_pdf_colorspace,
 )
+from app.fixes.images import (
+    resize_images_to_fit as _resize_images_to_fit,
+)
 from app.fixes.pptx import (
     adjust_pptx_font_size as _adjust_pptx_font_size,
 )
@@ -43,6 +46,9 @@ from app.fixes.xlsx import (
 )
 from app.fixes.xlsx import (
     set_xlsx_page_setup as _set_xlsx_page_setup,
+)
+from app.fixes.xlsx import (
+    auto_fit_xlsx_columns as _auto_fit_xlsx_columns,
 )
 from app.fixes.pdf_fallback import (
     pdf_crop_margins as _pdf_crop_margins,
@@ -299,6 +305,28 @@ async def check_image_dpi(
     return result.model_dump_json()
 
 
+@server.tool()
+async def resize_images_to_fit(
+    job_id: str,
+    max_width_pct: float = 100.0,
+    max_height_pct: float = 90.0,
+) -> str:
+    """Proportionally resize images in a DOCX that exceed the printable area.
+
+    Images are scaled down preserving aspect ratio so they fit within the
+    printable page dimensions. max_width_pct/max_height_pct control the
+    maximum percentage of printable area an image may occupy.
+    """
+    file_path, _ = await resolve_document(job_id)
+    result = await _resize_images_to_fit(
+        file_path, job_id, max_width_pct, max_height_pct,
+    )
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
 # -- XLSX Tools --
 
 
@@ -330,6 +358,29 @@ async def set_xlsx_page_setup(
     file_path, _ = await resolve_document(job_id)
     result = await _set_xlsx_page_setup(
         file_path, job_id, orientation, paper_size, fit_to_page,
+    )
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+@server.tool()
+async def auto_fit_xlsx_columns(
+    job_id: str,
+    max_col_width: float = 30.0,
+    min_col_width: float = 5.0,
+    shrink_margins: bool = True,
+) -> str:
+    """Auto-fit XLSX columns to fit within a single page width.
+
+    Analyses content widths, auto-selects portrait/landscape orientation,
+    tightens margins, and enables fit-to-page. Ideal for sheets where
+    columns overflow to additional printed pages.
+    """
+    file_path, _ = await resolve_document(job_id)
+    result = await _auto_fit_xlsx_columns(
+        file_path, job_id, max_col_width, min_col_width, shrink_margins,
     )
     if result.success:
         await re_render_job(job_id)

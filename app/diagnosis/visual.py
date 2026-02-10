@@ -129,7 +129,7 @@ async def _inspect_batch(
                 contents=Content(parts=parts),
                 config=GenerateContentConfig(
                     response_mime_type="application/json",
-                    temperature=0.2,
+                    temperature=1.0,  # Recommended for Gemini 3
                 ),
             ),
             timeout=settings.AI_API_TIMEOUT_SECONDS,

@@ -236,6 +236,14 @@ async def _load_fix_log(job_id: str) -> FixLog | None:
         return FixLog(job_id=job_id)
     async with aiofiles.open(path, "r") as f:
         data = json.loads(await f.read())
+    if isinstance(data, list):
+        fixes = [FixResult.model_validate(entry) for entry in data]
+        return FixLog(
+            job_id=job_id,
+            fixes=fixes,
+            total_applied=sum(1 for f in fixes if f.success),
+            total_failed=sum(1 for f in fixes if not f.success),
+        )
     return FixLog.model_validate(data)
 
 
@@ -333,8 +341,8 @@ async def _ai_visual_check(
     parts.append(Part.from_text(text=VERIFICATION_PROMPT))
 
     config = GenerateContentConfig(
-        temperature=0.1,
-        max_output_tokens=1024,
+        temperature=1.0,  # Recommended for Gemini 3
+        max_output_tokens=8192,
         response_mime_type="application/json",
     )
 

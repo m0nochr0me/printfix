@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="{{ url_for('static', path='/js/tailwind.js') }}"></script>
+    <script src="{{ url_for('static', path='/js/vue.global.js') }}"></script>
+    <script>
+        window.appRoot = "{{ url_for('index') }}";
+        if (window.appRoot.endsWith('/')) {
+            window.appRoot = window.appRoot.slice(0, -1);
+        }
+    </script>
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/custom.css') }}">
+    <title>PrintFix - {{ subtitle }}</title>
+    {% block head_extra %}{% endblock %}
+</head>
+
+<body class="bg-white text-black dark:text-white dark:bg-black">
+    <div id="app" class="min-h-screen flex flex-col">
+        <header class="bg-gray-800 text-white p-4 flex justify-between items-center">
+            <h1 class="text-2xl">PrintFix</h1>
+            <button @click="openModal" :class="hasKey ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'"
+                class="text-white font-bold py-2 px-4 rounded">
+                <span v-if="hasKey"><i class="icon key"></i> Unset API Key</span>
+                <span v-else><i class="icon key"></i> Set API Key</span>
+            </button>
+        </header>
+        <main class="flex-grow p-4">
+            {% block content %}{% endblock %}
+        </main>
+        <footer class="bg-gray-800 text-white p-4 text-center">
+            <a href="http://vgm.lol">&copy; 2026 m0nochr0me</a> - Version: {{ version }}
+        </footer>
+
+        <!-- Modal -->
+        <div v-if="showModal"
+            class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex items-center justify-center z-50"
+            id="my-modal">
+            <div class="relative p-5 border w-96 shadow-lg rounded-md bg-white dark:bg-gray-800">
+                <div class="mt-3 text-center">
+                    <h3 class="text-lg leading-6 font-medium text-gray-900 dark:text-white">API Key Settings</h3>
+                    <div class="mt-2 px-7 py-3">
+                        <p v-if="hasKey" class="text-sm text-gray-500 dark:text-gray-300">
+                            Are you sure you want to remove the API Key?
+                        </p>
+                        <div v-else>
+                            <input v-model="apiKeyInput" type="password" :class="{'animate-spin': isLoading}"
+                                class="w-full px-3 py-2 border rounded-md text-gray-700 dark:text-gray-300 dark:bg-gray-700 focus:outline-none"
+                                placeholder="Enter API Key">
+                            <p v-if="errorMessage" class="text-red-500 text-sm mt-1">${ errorMessage }</p>
+                        </div>
+                    </div>
+                    <div class="items-center px-4 py-3">
+                        <button @click="confirmAction"
+                            class="px-4 py-2 text-white text-base font-medium rounded-md w-full shadow-sm  focus:outline-none focus:ring-2"
+                            :class="hasKey ? 'bg-red-500 hover:bg-red-700 focus:ring-red-300' : 'bg-blue-500 hover:bg-blue-700 focus:ring-blue-300'">
+                            <span v-if="hasKey">Remove</span>
+                            <span v-else>Save</span>
+                        </button>
+                        <button @click="closeModal"
+                            class="mt-3 px-4 py-2 bg-gray-300 text-gray-700 text-base font-medium rounded-md w-full shadow-sm hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-300">
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+        const { createApp, ref, onMounted, computed } = Vue;
+
+        const app = createApp({
+            setup() {
+                const showModal = ref(false);
+                const apiKey = ref('');
+                const apiKeyInput = ref('');
+                const errorMessage = ref('');
+                const isLoading = ref(false);
+
+                const hasKey = computed(() => !!apiKey.value);
+
+                onMounted(() => {
+                    apiKey.value = localStorage.getItem('x-api-key') || '';
+                });
+
+                const openModal = () => {
+                    apiKeyInput.value = '';
+                    errorMessage.value = '';
+                    isLoading.value = false;
+                    showModal.value = true;
+                };
+
+                const closeModal = () => {
+                    showModal.value = false;
+                };
+
+                const confirmAction = async () => {
+                    if (hasKey.value) {
+                        localStorage.removeItem('x-api-key');
+                        apiKey.value = '';
+                        closeModal();
+                    } else {
+                        if (apiKeyInput.value) {
+                            isLoading.value = true;
+                            try {
+                                const response = await fetch('/v1/auth', {
+                                    headers: {
+                                        'Authorization': `Bearer ${apiKeyInput.value}`
+                                    }
+                                });
+                                if (response.ok) {
+                                    localStorage.setItem('x-api-key', apiKeyInput.value);
+                                    apiKey.value = apiKeyInput.value;
+                                    closeModal();
+                                } else {
+                                    errorMessage.value = 'Invalid API Key';
+                                }
+                            } catch (e) {
+                                errorMessage.value = 'Error validating API Key';
+                            } finally {
+                                isLoading.value = false;
+                            }
+                        }
+                    }
+                };
+
+                let extraData = {};
+                if (window.extraSetup) {
+                    extraData = window.extraSetup(Vue, { apiKey, hasKey });
+                }
+
+                return {
+                    showModal,
+                    apiKey,
+                    apiKeyInput,
+                    errorMessage,
+                    isLoading,
+                    hasKey,
+                    openModal,
+                    closeModal,
+                    confirmAction,
+                    ...extraData
+                };
+            }
+        });
+
+        app.config.compilerOptions.delimiters = ['${', '}'];
+        app.mount('#app');
+    </script>
+</body>
+
+</html>

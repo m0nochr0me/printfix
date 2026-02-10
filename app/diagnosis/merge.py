@@ -87,20 +87,7 @@ async def merge_diagnoses_ai(
     page_count: int,
     config: EffortConfig,
 ) -> DocumentDiagnosis:
-    """AI-assisted merge using Claude for Thorough effort level."""
-    from app.core.ai import extract_anthropic_text, get_anthropic_client
-
-    client = get_anthropic_client()
-    if not client:
-        logger.warning(
-            f"Job {job_id}: Anthropic client not configured, "
-            "falling back to rule-based merge"
-        )
-        return merge_diagnoses(
-            visual_pages, structural_issues,
-            job_id, effort_level, file_type, page_count,
-        )
-
+    """AI-assisted merge using Gemini (or Claude if enabled) for Thorough effort level."""
     # Serialize findings for the prompt
     visual_json = json.dumps(
         [p.model_dump() for p in visual_pages], indent=2
@@ -114,29 +101,15 @@ async def merge_diagnoses_ai(
         structural_findings=structural_json,
     )
 
-    model = config.claude_model or settings.ANTHROPIC_DIAGNOSIS_MODEL
-
     try:
         from app.core.retry import with_retry
 
-        async def _call_claude() -> str:
-            resp = await asyncio.wait_for(
-                asyncio.to_thread(
-                    client.messages.create,
-                    model=model,
-                    max_tokens=4096,
-                    messages=[{"role": "user", "content": prompt}],
-                ),
-                timeout=settings.AI_API_TIMEOUT_SECONDS,
-            )
-            return extract_anthropic_text(resp)
+        # Use Anthropic if explicitly enabled, otherwise use Gemini
+        if settings.USE_ANTHROPIC_AI:
+            raw_text = await _call_claude_merge(prompt, config, job_id)
+        else:
+            raw_text = await _call_gemini_merge(prompt, config, job_id)
 
-        raw_text = await with_retry(
-            _call_claude,
-            max_retries=settings.AI_API_MAX_RETRIES,
-            retryable=(TimeoutError, asyncio.TimeoutError, ConnectionError, OSError),
-            label=f"claude-merge({job_id})",
-        )
         data = json.loads(raw_text)
         return _parse_ai_merge_response(
             data, job_id, effort_level, file_type, page_count,
@@ -149,6 +122,69 @@ async def merge_diagnoses_ai(
             visual_pages, structural_issues,
             job_id, effort_level, file_type, page_count,
         )
+
+
+async def _call_gemini_merge(prompt: str, config: EffortConfig, job_id: str) -> str:
+    """Call Gemini for diagnosis merge."""
+    from google.genai.types import GenerateContentConfig
+
+    from app.core.ai import ai_client
+    from app.core.retry import with_retry
+
+    model = config.visual_model or "gemini-3-flash-preview"
+
+    async def _do_call() -> str:
+        resp = await asyncio.wait_for(
+            asyncio.to_thread(
+                ai_client.models.generate_content,
+                model=model,
+                contents=prompt,
+                config=GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=1.0,  # Recommended for Gemini 3
+                ),
+            ),
+            timeout=settings.AI_API_TIMEOUT_SECONDS,
+        )
+        return resp.text or ""
+
+    return await with_retry(
+        _do_call,
+        max_retries=settings.AI_API_MAX_RETRIES,
+        retryable=(TimeoutError, asyncio.TimeoutError, ConnectionError, OSError),
+        label=f"gemini-merge({job_id})",
+    )
+
+
+async def _call_claude_merge(prompt: str, config: EffortConfig, job_id: str) -> str:
+    """Call Claude for diagnosis merge (only if explicitly enabled)."""
+    from app.core.ai import extract_anthropic_text, get_anthropic_client
+    from app.core.retry import with_retry
+
+    client = get_anthropic_client()
+    if not client:
+        raise RuntimeError("Anthropic client not configured but USE_ANTHROPIC_AI is True")
+
+    model = config.claude_model or settings.ANTHROPIC_DIAGNOSIS_MODEL
+
+    async def _do_call() -> str:
+        resp = await asyncio.wait_for(
+            asyncio.to_thread(
+                client.messages.create,
+                model=model,
+                max_tokens=4096,
+                messages=[{"role": "user", "content": prompt}],
+            ),
+            timeout=settings.AI_API_TIMEOUT_SECONDS,
+        )
+        return extract_anthropic_text(resp)
+
+    return await with_retry(
+        _do_call,
+        max_retries=settings.AI_API_MAX_RETRIES,
+        retryable=(TimeoutError, asyncio.TimeoutError, ConnectionError, OSError),
+        label=f"claude-merge({job_id})",
+    )
 
 
 def _deduplicate_issues(issues: list[DiagnosisIssue]) -> list[DiagnosisIssue]:

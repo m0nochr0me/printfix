@@ -49,6 +49,7 @@ def _analyze_docx_sync(file_path: str, job_id: str) -> list[DiagnosisIssue]:
         issues.extend(_check_margins(doc))
         issues.extend(_check_fonts(doc))
         issues.extend(_check_tables(doc))
+        issues.extend(_check_images(doc))
         issues.extend(_check_page_breaks(doc))
         issues.extend(_check_hidden_content(doc))
         issues.extend(_check_tracked_changes(file_path))
@@ -217,6 +218,78 @@ def _check_tables(doc) -> list[DiagnosisIssue]:
                 suggested_fix="auto_fit_tables",
                 confidence=0.9,
             ))
+
+    return issues
+
+
+def _check_images(doc) -> list[DiagnosisIssue]:
+    """Check if inline images exceed printable width."""
+    issues: list[DiagnosisIssue] = []
+
+    # Get printable width from first section
+    if not doc.sections:
+        return issues
+    section = doc.sections[0]
+    page_width = section.page_width or 0
+    left_margin = section.left_margin or 0
+    right_margin = section.right_margin or 0
+    printable_width = page_width - left_margin - right_margin
+
+    if printable_width <= 0:
+        return issues
+
+    printable_width_inches = printable_width / _EMU_PER_INCH
+    overflow_images: list[tuple[int, float, float]] = []  # (para_num, img_width_in, overflow_pct)
+
+    # Check inline images in paragraphs
+    for para_num, para in enumerate(doc.paragraphs, 1):
+        for run in para.runs:
+            # Check for inline shapes (images)
+            inline_shapes = run._element.findall(
+                ".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}drawing"
+            )
+            for drawing in inline_shapes:
+                # Get extent (size) of the image
+                extent = drawing.find(
+                    ".//{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}extent"
+                )
+                if extent is not None:
+                    cx = extent.get("cx")  # width in EMUs
+                    if cx:
+                        img_width = int(cx)
+                        img_width_inches = img_width / _EMU_PER_INCH
+
+                        # Calculate size relative to page
+                        img_pct_of_page = (img_width / page_width) * 100 if page_width > 0 else 0
+
+                        if img_width > printable_width:
+                            overflow_pct = ((img_width - printable_width) / printable_width) * 100
+                            overflow_images.append((para_num, img_width_inches, overflow_pct))
+
+                            # Severity based on image size and overflow
+                            if img_pct_of_page > 20 and overflow_pct > 10:
+                                severity = IssueSeverity.critical
+                                severity_note = "significant overflow"
+                            elif img_pct_of_page > 5 and overflow_pct > 5:
+                                severity = IssueSeverity.warning
+                                severity_note = "moderate overflow"
+                            else:
+                                severity = IssueSeverity.info
+                                severity_note = "minor overflow"
+
+                            issues.append(DiagnosisIssue(
+                                type=IssueType.image_overflow,
+                                severity=severity,
+                                source=IssueSource.structural,
+                                location=f"paragraph {para_num}",
+                                description=(
+                                    f"Image width {img_width_inches:.2f}\" exceeds printable area "
+                                    f"{printable_width_inches:.2f}\" by {overflow_pct:.0f}% "
+                                    f"({severity_note})"
+                                ),
+                                suggested_fix="resize_image_to_fit",
+                                confidence=0.9,
+                            ))
 
     return issues
 

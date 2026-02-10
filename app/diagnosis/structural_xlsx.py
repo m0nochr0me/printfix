@@ -54,7 +54,7 @@ def _analyze_xlsx_sync(file_path: str, job_id: str) -> list[DiagnosisIssue]:
 
 
 def _check_page_setup(ws, sheet_name: str) -> list[DiagnosisIssue]:
-    """Check print orientation, paper size, and scaling."""
+    """Check print orientation, paper size, scaling, and landscape needs."""
     issues: list[DiagnosisIssue] = []
     ps = ws.page_setup
 
@@ -72,6 +72,59 @@ def _check_page_setup(ws, sheet_name: str) -> list[DiagnosisIssue]:
             suggested_fix="set_xlsx_page_setup",
             confidence=0.7,
         ))
+
+    # Estimate total content width vs printable area to recommend landscape
+    char_width_inches = 1 / 7.0
+    total_width = 0.0
+    for col_letter in ws.column_dimensions:
+        dim = ws.column_dimensions[col_letter]
+        col_width = dim.width or 8.43
+        total_width += col_width * char_width_inches
+
+    pm = ws.page_margins
+    left = pm.left or 0.75
+    right = pm.right or 0.75
+    paper_id = ps.paperSize or 1
+    page_w, page_h = _PAPER_SIZES.get(paper_id, (8.5, 11.0))
+
+    # Current orientation
+    is_landscape = (ps.orientation == "landscape")
+    if is_landscape:
+        page_w, page_h = page_h, page_w
+
+    printable_width = page_w - left - right
+
+    # If content overflows in portrait, check if landscape would help
+    if total_width > printable_width and not is_landscape:
+        landscape_w = page_h  # swap gives landscape width
+        landscape_printable = landscape_w - left - right
+        if total_width <= landscape_printable * 1.1:  # fits in landscape
+            issues.append(DiagnosisIssue(
+                type=IssueType.wrong_orientation,
+                severity=IssueSeverity.critical,
+                source=IssueSource.structural,
+                description=(
+                    f"Sheet '{sheet_name}' content width (~{total_width:.1f}\") "
+                    f"overflows portrait ({printable_width:.1f}\") but fits in "
+                    f"landscape ({landscape_printable:.1f}\") — switch to landscape"
+                ),
+                suggested_fix="set_xlsx_page_setup",
+                confidence=0.9,
+            ))
+        else:
+            # Even landscape won't fit — need fit-to-page + landscape
+            issues.append(DiagnosisIssue(
+                type=IssueType.table_overflow,
+                severity=IssueSeverity.critical,
+                source=IssueSource.structural,
+                description=(
+                    f"Sheet '{sheet_name}' content width (~{total_width:.1f}\") "
+                    f"exceeds even landscape printable area ({landscape_printable:.1f}\") "
+                    f"— needs landscape + fit-to-page to prevent column overflow"
+                ),
+                suggested_fix="set_xlsx_page_setup",
+                confidence=0.9,
+            ))
 
     return issues
 
