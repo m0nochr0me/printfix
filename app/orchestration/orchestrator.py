@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 
 import aiofiles
 
@@ -13,15 +14,21 @@ from app.core.effort import EffortConfig, get_effort_config
 from app.core.log import logger
 from app.core.storage import get_job_dir
 from app.diagnosis.merge import merge_diagnoses, merge_diagnoses_ai
+from app.diagnosis.structural_docx import analyze_docx
 from app.diagnosis.structural_pdf import analyze_pdf
+from app.diagnosis.structural_pptx import analyze_pptx
+from app.diagnosis.structural_xlsx import analyze_xlsx
 from app.diagnosis.visual import inspect_pages_visually
 from app.orchestration.convergence import should_stop
 from app.orchestration.executor import execute_plan
-from app.orchestration.planner import plan_fixes
+from app.orchestration.planner import (
+    _DOCX_TO_PDF_FALLBACK,
+    _is_editable_format,
+    plan_fixes,
+)
 from app.schema.diagnosis import (
     DiagnosisIssue,
     DocumentDiagnosis,
-    IssueSeverity,
 )
 from app.schema.job import EffortLevel
 from app.schema.orchestration import ConvergenceState, OrchestrationResult
@@ -79,11 +86,7 @@ async def run_fix_loop(job_id: str) -> OrchestrationResult:
         logger.info(
             f"Job {job_id}: iteration {iteration}/{effort_config.max_fix_iterations} — "
             f"{issues_before} issues ({critical_before} critical)"
-            + (
-                f", fallback candidates: {cumulative_failed_issue_types}"
-                if cumulative_failed_issue_types
-                else ""
-            )
+            + (f", fallback candidates: {cumulative_failed_issue_types}" if cumulative_failed_issue_types else "")
         )
 
         # 1. Plan fixes (pass failed issue types for PDF fallback routing)
@@ -123,7 +126,8 @@ async def run_fix_loop(job_id: str) -> OrchestrationResult:
 
         # 2. Execute fixes
         applied, failed, iter_failed_issues, iter_used_fallback = await execute_plan(
-            job_id, plan.actions,
+            job_id,
+            plan.actions,
         )
         total_applied += applied
         total_failed += failed
@@ -133,8 +137,7 @@ async def run_fix_loop(job_id: str) -> OrchestrationResult:
 
         logger.info(
             f"Job {job_id}: iteration {iteration} — "
-            f"{applied} applied, {failed} failed"
-            + (f", used PDF fallback" if iter_used_fallback else "")
+            f"{applied} applied, {failed} failed" + (", used PDF fallback" if iter_used_fallback else "")
         )
 
         # 3. Re-diagnose to evaluate remaining issues
@@ -167,12 +170,12 @@ async def run_fix_loop(job_id: str) -> OrchestrationResult:
 
         # 5. Check stopping condition (with fallback awareness)
         fallback_available = _has_untried_fallback(
-            cumulative_failed_issue_types, convergence_history, file_type,
+            cumulative_failed_issue_types,
+            convergence_history,
+            file_type,
         )
         if fallback_available:
-            logger.info(
-                f"Job {job_id}: PDF fallback available for: {cumulative_failed_issue_types}"
-            )
+            logger.info(f"Job {job_id}: PDF fallback available for: {cumulative_failed_issue_types}")
         stop, reason = should_stop(
             convergence_history,
             effort_config.max_fix_iterations,
@@ -180,8 +183,7 @@ async def run_fix_loop(job_id: str) -> OrchestrationResult:
         )
         if stop:
             logger.info(
-                f"Job {job_id}: stopping — {reason}"
-                + (f" (fallback was available)" if fallback_available else "")
+                f"Job {job_id}: stopping — {reason}" + (", fallback was available" if fallback_available else "")
             )
             break
 
@@ -203,13 +205,12 @@ async def run_fix_loop(job_id: str) -> OrchestrationResult:
         final_critical=final_critical,
         converged=converged,
         used_fallback=any_fallback_used,
-        stop_reason=convergence_history[-1].iteration >= effort_config.max_fix_iterations
-        and not converged
-        and "max iterations reached"
-        or (
-            "print-ready" if converged else
-            should_stop(convergence_history, effort_config.max_fix_iterations)[1]
-        ),
+        stop_reason=(
+            convergence_history[-1].iteration >= effort_config.max_fix_iterations
+            and not converged
+            and "max iterations reached"
+        )
+        or ("print-ready" if converged else should_stop(convergence_history, effort_config.max_fix_iterations)[1]),
     )
 
     logger.info(
@@ -217,8 +218,7 @@ async def run_fix_loop(job_id: str) -> OrchestrationResult:
         f"{result.iterations} iterations, "
         f"{total_applied} fixes applied, "
         f"{initial_issues} → {final_issues} issues, "
-        f"converged={converged}"
-        + (", used PDF fallback" if any_fallback_used else "")
+        f"converged={converged}" + (", used PDF fallback" if any_fallback_used else "")
     )
 
     return result
@@ -237,7 +237,6 @@ def _has_untried_fallback(
     - There are failed issue types that have PDF fallback mappings
     - No iteration has yet used fallback tools
     """
-    from app.orchestration.planner import _DOCX_TO_PDF_FALLBACK, _is_editable_format
 
     if not _is_editable_format(file_type):
         return False
@@ -300,20 +299,14 @@ async def _run_diagnosis(
     # Additionally analyze original format if applicable
     original_dir = get_job_dir(job_id) / "original"
     if file_type == ".docx":
-        from app.diagnosis.structural_docx import analyze_docx
-
         docx_files = list(original_dir.glob("*.docx"))
         if docx_files:
             structural_issues.extend(await analyze_docx(str(docx_files[0]), job_id))
     elif file_type == ".xlsx":
-        from app.diagnosis.structural_xlsx import analyze_xlsx
-
         xlsx_files = list(original_dir.glob("*.xlsx"))
         if xlsx_files:
             structural_issues.extend(await analyze_xlsx(str(xlsx_files[0]), job_id))
     elif file_type == ".pptx":
-        from app.diagnosis.structural_pptx import analyze_pptx
-
         pptx_files = list(original_dir.glob("*.pptx"))
         if pptx_files:
             structural_issues.extend(await analyze_pptx(str(pptx_files[0]), job_id))
@@ -321,13 +314,22 @@ async def _run_diagnosis(
     # Merge (rule-based within fix loop — skip expensive AI merge)
     if effort_config.use_ai_merge:
         diagnosis = await merge_diagnoses_ai(
-            visual_pages, structural_issues,
-            job_id, str(effort), file_type, page_count, effort_config,
+            visual_pages,
+            structural_issues,
+            job_id,
+            str(effort),
+            file_type,
+            page_count,
+            effort_config,
         )
     else:
         diagnosis = merge_diagnoses(
-            visual_pages, structural_issues,
-            job_id, str(effort), file_type, page_count,
+            visual_pages,
+            structural_issues,
+            job_id,
+            str(effort),
+            file_type,
+            page_count,
         )
 
     return diagnosis
@@ -342,7 +344,8 @@ async def _store_diagnosis(job_id: str, diagnosis: DocumentDiagnosis) -> None:
         await f.write(diagnosis.model_dump_json(indent=2))
 
     await JobStateManager.set_state(
-        job_id, "fixing",
+        job_id,
+        "fixing",
         extra={
             "issues_found": str(diagnosis.summary.total_issues),
             "print_readiness": diagnosis.summary.print_readiness,
@@ -357,7 +360,6 @@ async def _snapshot_initial_state(job_id: str, diagnosis: DocumentDiagnosis) -> 
     Saves diagnosis as diagnosis_initial.json and copies pages/ to pages_before/.
     Safe to call multiple times — skips if snapshots already exist.
     """
-    import shutil
 
     job_dir = get_job_dir(job_id)
 
@@ -374,4 +376,3 @@ async def _snapshot_initial_state(job_id: str, diagnosis: DocumentDiagnosis) -> 
     if pages_dir.exists() and not before_dir.exists():
         shutil.copytree(pages_dir, before_dir)
         logger.debug(f"Job {job_id}: saved before-pages snapshot")
-

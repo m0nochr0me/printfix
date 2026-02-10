@@ -10,9 +10,14 @@ from __future__ import annotations
 import asyncio
 import json
 
+from google.genai.types import GenerateContentConfig, ThinkingConfig, ThinkingLevel
+
+from app.core.ai import ai_client, extract_anthropic_text, get_anthropic_client
 from app.core.config import settings
 from app.core.effort import EffortConfig
 from app.core.log import logger
+from app.core.prompts import FIX_PLANNING_PROMPT
+from app.core.retry import with_retry
 from app.schema.diagnosis import (
     DiagnosisIssue,
     DocumentDiagnosis,
@@ -30,7 +35,7 @@ _DOCX_ISSUE_MAP: dict[str, list[FixAction]] = {
             tool_name="set_margins",
             params={"top": 0.75, "bottom": 0.75, "left": 0.75, "right": 0.75},
             target_issues=["margin_violation"],
-            reasoning="Set safe 0.75\" margins to prevent content clipping",
+            reasoning='Set safe 0.75" margins to prevent content clipping',
         ),
     ],
     "inconsistent_margins": [
@@ -405,11 +410,7 @@ def plan_fixes_rule_based(
             continue
 
         # If this issue type already failed with DOCX tools, try PDF fallback
-        use_fallback = (
-            is_editable
-            and issue_type in failed_issue_types
-            and issue_type in _DOCX_TO_PDF_FALLBACK
-        )
+        use_fallback = is_editable and issue_type in failed_issue_types and issue_type in _DOCX_TO_PDF_FALLBACK
 
         if use_fallback:
             active_map = _DOCX_TO_PDF_FALLBACK
@@ -417,11 +418,7 @@ def plan_fixes_rule_based(
         else:
             active_map = issue_map
             # Use suggested_fix from diagnosis if available and in our map
-            lookup_key = (
-                issue.suggested_fix
-                if issue.suggested_fix in active_map
-                else issue_type
-            )
+            lookup_key = issue.suggested_fix if issue.suggested_fix in active_map else issue_type
 
         if lookup_key not in active_map:
             # Last resort: try PDF fallback for editable formats
@@ -454,17 +451,27 @@ def plan_fixes_rule_based(
     # Sort: structural changes first, then content changes;
     # within structural, non-fallback before fallback
     structural_tools = {
-        "set_margins", "set_page_size", "set_orientation",
-        "remove_blank_pages", "fix_page_breaks", "remove_manual_breaks",
-        "pdf_crop_margins", "pdf_scale_content", "pdf_rotate_pages",
-        "set_xlsx_margins", "set_xlsx_page_setup", "auto_fit_xlsx_columns",
+        "set_margins",
+        "set_page_size",
+        "set_orientation",
+        "remove_blank_pages",
+        "fix_page_breaks",
+        "remove_manual_breaks",
+        "pdf_crop_margins",
+        "pdf_scale_content",
+        "pdf_rotate_pages",
+        "set_xlsx_margins",
+        "set_xlsx_page_setup",
+        "auto_fit_xlsx_columns",
         "resize_images_to_fit",
     }
-    actions.sort(key=lambda a: (
-        0 if a.tool_name in structural_tools else 1,
-        1 if a.is_fallback else 0,
-        a.tool_name,
-    ))
+    actions.sort(
+        key=lambda a: (
+            0 if a.tool_name in structural_tools else 1,
+            1 if a.is_fallback else 0,
+            a.tool_name,
+        )
+    )
 
     return FixPlan(
         job_id=diagnosis.job_id,
@@ -487,7 +494,6 @@ async def plan_fixes_ai(
     AI-driven fix planning: send diagnosis to Gemini or Claude to get a fix plan.
     Falls back to rule-based if the AI call fails.
     """
-    from app.core.prompts import FIX_PLANNING_PROMPT
 
     failed_issue_types = failed_issue_types or set()
 
@@ -503,23 +509,27 @@ async def plan_fixes_ai(
         )
 
     diagnosis_json = diagnosis.model_dump_json(indent=2)
-    prompt = FIX_PLANNING_PROMPT.format(
-        file_type=file_type,
-        target_page_size=target_page_size or "original",
-        aggressiveness=aggressiveness,
-        diagnosis_json=diagnosis_json,
-    ) + fallback_context
+    prompt = (
+        FIX_PLANNING_PROMPT.format(
+            file_type=file_type,
+            target_page_size=target_page_size or "original",
+            aggressiveness=aggressiveness,
+            diagnosis_json=diagnosis_json,
+        )
+        + fallback_context
+    )
 
     try:
         raw_text = await _call_planning_model(prompt, effort_config)
         return _parse_ai_plan(raw_text, diagnosis.job_id, iteration)
     except Exception:
-        logger.exception(
-            f"Job {diagnosis.job_id}: AI fix planning failed, "
-            "falling back to rule-based"
-        )
+        logger.exception(f"Job {diagnosis.job_id}: AI fix planning failed, falling back to rule-based")
         return plan_fixes_rule_based(
-            diagnosis, aggressiveness, file_type, target_page_size, iteration,
+            diagnosis,
+            aggressiveness,
+            file_type,
+            target_page_size,
+            iteration,
             failed_issue_types=failed_issue_types,
         )
 
@@ -536,25 +546,19 @@ async def _call_planning_model(prompt: str, effort_config: EffortConfig) -> str:
 
 async def _call_gemini(prompt: str, effort_config: EffortConfig) -> str:
     """Call Gemini for fix planning with retry + timeout."""
-    from google.genai.types import GenerateContentConfig
-
-    from app.core.ai import ai_client
-    from app.core.retry import with_retry
 
     model = effort_config.orchestration_model or "gemini-3-flash-preview"
 
     async def _do_call() -> str:
-        resp = await asyncio.wait_for(
-            asyncio.to_thread(
-                ai_client.models.generate_content,
-                model=model,
-                contents=prompt,
-                config=GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=1.0,  # Recommended for Gemini 3
-                ),
+        resp = await ai_client.aio.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=1.0,  # Recommended for Gemini 3
+                top_p=0.9,
+                thinking_config=ThinkingConfig(thinking_level=ThinkingLevel.HIGH),
             ),
-            timeout=settings.AI_API_TIMEOUT_SECONDS,
         )
         return resp.text or ""
 
@@ -568,8 +572,6 @@ async def _call_gemini(prompt: str, effort_config: EffortConfig) -> str:
 
 async def _call_claude(prompt: str, effort_config: EffortConfig) -> str:
     """Call Claude for fix planning (Thorough effort) with retry + timeout."""
-    from app.core.ai import extract_anthropic_text, get_anthropic_client
-    from app.core.retry import with_retry
 
     client = get_anthropic_client()
     if not client:
@@ -613,13 +615,15 @@ def _parse_ai_plan(raw_text: str, job_id: str, iteration: int) -> FixPlan:
     actions: list[FixAction] = []
     for item in data.get("actions", []):
         tool = item["tool_name"]
-        actions.append(FixAction(
-            tool_name=tool,
-            params=item.get("params", {}),
-            target_issues=item.get("target_issues", []),
-            reasoning=item.get("reasoning", ""),
-            is_fallback=item.get("is_fallback", tool in pdf_tools),
-        ))
+        actions.append(
+            FixAction(
+                tool_name=tool,
+                params=item.get("params", {}),
+                target_issues=item.get("target_issues", []),
+                reasoning=item.get("reasoning", ""),
+                is_fallback=item.get("is_fallback", tool in pdf_tools),
+            )
+        )
 
     skipped: list[str] = []
     for item in data.get("skipped_issues", []):
@@ -656,12 +660,20 @@ async def plan_fixes(
 
     if use_ai:
         return await plan_fixes_ai(
-            diagnosis, aggressiveness, file_type, effort_config,
-            target_page_size, iteration,
+            diagnosis,
+            aggressiveness,
+            file_type,
+            effort_config,
+            target_page_size,
+            iteration,
             failed_issue_types=failed_issue_types,
         )
 
     return plan_fixes_rule_based(
-        diagnosis, aggressiveness, file_type, target_page_size, iteration,
+        diagnosis,
+        aggressiveness,
+        file_type,
+        target_page_size,
+        iteration,
         failed_issue_types=failed_issue_types,
     )

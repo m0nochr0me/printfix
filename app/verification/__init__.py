@@ -12,7 +12,7 @@ import shutil
 from pathlib import Path
 
 import aiofiles
-from google.genai.types import Content, GenerateContentConfig, Part
+from google.genai.types import Content, GenerateContentConfig, Part, ThinkingConfig, ThinkingLevel
 
 from app.core.ai import ai_client
 from app.core.effort import EffortConfig, get_effort_config
@@ -70,8 +70,10 @@ async def run_verification(job_id: str) -> VerificationResult:
 
     # --- 3. Build page comparisons ---
     comparisons = _build_page_comparisons(
-        before_pages, after_pages,
-        initial_diagnosis, final_diagnosis,
+        before_pages,
+        after_pages,
+        initial_diagnosis,
+        final_diagnosis,
     )
 
     # --- 4. AI visual quality check (effort-dependent) ---
@@ -79,8 +81,10 @@ async def run_verification(job_id: str) -> VerificationResult:
     if effort in (EffortLevel.standard, EffortLevel.thorough) and after_pages:
         try:
             visual_score = await _ai_visual_check(
-                before_pages, after_pages,
-                effort_config, job_id,
+                before_pages,
+                after_pages,
+                effort_config,
+                job_id,
             )
         except Exception:
             logger.exception(f"Job {job_id}: AI visual check failed, using algorithmic score only")
@@ -131,6 +135,7 @@ async def run_verification(job_id: str) -> VerificationResult:
 # ---------------------------------------------------------------------------
 # Before / After rendering
 # ---------------------------------------------------------------------------
+
 
 async def _render_after_pages(job_id: str, job: dict) -> list[str]:
     """
@@ -204,6 +209,7 @@ def _get_before_pages(job_id: str) -> list[str]:
 # Data loaders
 # ---------------------------------------------------------------------------
 
+
 async def _load_diagnosis(job_id: str, filename: str) -> DocumentDiagnosis | None:
     """Load a diagnosis JSON file."""
     path = get_job_dir(job_id) / filename
@@ -251,6 +257,7 @@ async def _load_fix_log(job_id: str) -> FixLog | None:
 # Page comparisons
 # ---------------------------------------------------------------------------
 
+
 def _build_page_comparisons(
     before_pages: list[str],
     after_pages: list[str],
@@ -288,14 +295,16 @@ def _build_page_comparisons(
             improvement = (issues_b - issues_a) / issues_b
             page_conf = max(0.0, min(100.0, 50.0 + improvement * 50.0))
 
-        comparisons.append(PageComparison(
-            page=i,
-            before_image=before_img,
-            after_image=after_img,
-            issues_before=issues_b,
-            issues_after=issues_a,
-            confidence=round(page_conf, 1),
-        ))
+        comparisons.append(
+            PageComparison(
+                page=i,
+                before_image=before_img,
+                after_image=after_img,
+                issues_before=issues_b,
+                issues_after=issues_a,
+                confidence=round(page_conf, 1),
+            )
+        )
 
     return comparisons
 
@@ -303,6 +312,7 @@ def _build_page_comparisons(
 # ---------------------------------------------------------------------------
 # AI visual quality check
 # ---------------------------------------------------------------------------
+
 
 async def _ai_visual_check(
     before_pages: list[str],
@@ -338,12 +348,14 @@ async def _ai_visual_check(
             image_bytes = await asyncio.to_thread(Path(after_path).read_bytes)
             parts.append(Part.from_bytes(data=image_bytes, mime_type="image/png"))
 
-    parts.append(Part.from_text(text=VERIFICATION_PROMPT))
+    # parts.append(Part.from_text(text=VERIFICATION_PROMPT))
 
     config = GenerateContentConfig(
         temperature=1.0,  # Recommended for Gemini 3
-        max_output_tokens=8192,
+        top_p=0.9,
+        thinking_config=ThinkingConfig(thinking_level=ThinkingLevel.HIGH),
         response_mime_type="application/json",
+        system_instruction=VERIFICATION_PROMPT,
     )
 
     response = await ai_client.aio.models.generate_content(
@@ -356,7 +368,7 @@ async def _ai_visual_check(
         result = json.loads(response.text or "{}")
         score = float(result.get("overall_score", 85.0))
         return max(0.0, min(100.0, score))
-    except (json.JSONDecodeError, ValueError, TypeError):
+    except json.JSONDecodeError, ValueError, TypeError:
         logger.warning(f"Job {job_id}: could not parse AI visual score, defaulting to 85")
         return 85.0
 
@@ -382,6 +394,7 @@ def _sample_indices(count: int, total: int) -> list[int]:
 # ---------------------------------------------------------------------------
 # Confidence scoring
 # ---------------------------------------------------------------------------
+
 
 def _compute_confidence(
     initial_diagnosis: DocumentDiagnosis | None,
@@ -433,7 +446,7 @@ def _compute_confidence(
     # --- Severity penalty ---
     severity_penalty = 0.0
     severity_penalty -= final_critical * 15.0  # Heavy penalty per remaining critical
-    severity_penalty -= final_warning * 5.0    # Moderate penalty per remaining warning
+    severity_penalty -= final_warning * 5.0  # Moderate penalty per remaining warning
     severity_penalty = max(-50.0, severity_penalty)  # Cap at -50
 
     # --- Combine ---
@@ -457,6 +470,7 @@ def _compute_confidence(
 # ---------------------------------------------------------------------------
 # Fix report generation
 # ---------------------------------------------------------------------------
+
 
 def _generate_report(
     job_id: str,
@@ -512,14 +526,16 @@ def _generate_report(
                 if successful and successful[0].after_value:
                     details = f"Changed to: {successful[0].after_value}"
 
-            entries.append(FixReportEntry(
-                issue_type=issue.type.value,
-                severity=issue.severity.value,
-                description=issue.description,
-                action_taken=action,
-                tool_used=tool_used,
-                details=details,
-            ))
+            entries.append(
+                FixReportEntry(
+                    issue_type=issue.type.value,
+                    severity=issue.severity.value,
+                    description=issue.description,
+                    action_taken=action,
+                    tool_used=tool_used,
+                    details=details,
+                )
+            )
 
     # Compute counts
     fixed_count = sum(1 for e in entries if e.action_taken == "fixed")
@@ -556,7 +572,8 @@ def _generate_report(
 
 
 def _issue_resolved_in_final(
-    issue, final_diagnosis: DocumentDiagnosis | None,
+    issue,
+    final_diagnosis: DocumentDiagnosis | None,
 ) -> bool:
     """Check if an issue from initial diagnosis is absent in final diagnosis."""
     if not final_diagnosis:
@@ -619,9 +636,7 @@ def _narrative_summary(
     elif readiness == "needs_review":
         parts.append("Some issues remain — human review is recommended before printing.")
     else:
-        parts.append(
-            "Significant problems persist — manual intervention is recommended."
-        )
+        parts.append("Significant problems persist — manual intervention is recommended.")
 
     parts.append(f"Overall confidence score: {confidence.final_score:.0f}/100.")
 
@@ -631,6 +646,7 @@ def _narrative_summary(
 # ---------------------------------------------------------------------------
 # Persistence
 # ---------------------------------------------------------------------------
+
 
 async def _persist_verification(job_id: str, result: VerificationResult) -> str:
     """Save verification result to disk. Returns the file path."""

@@ -1,17 +1,23 @@
 """Visual page inspection using Gemini multimodal models."""
 
-from __future__ import annotations
-
 import asyncio
 import json
 from pathlib import Path
 
-from google.genai.types import Content, GenerateContentConfig, Part
+from google.genai.types import (
+    Content,
+    GenerateContentConfig,
+    Part,
+    ThinkingConfig,
+    ThinkingLevel,
+)
 
 from app.core.ai import ai_client
+from app.core.config import settings
 from app.core.effort import EffortConfig
 from app.core.log import logger
 from app.core.prompts import VISUAL_INSPECTION_PROMPT
+from app.core.retry import with_retry
 from app.schema.diagnosis import (
     DiagnosisIssue,
     IssueSeverity,
@@ -104,7 +110,7 @@ async def _inspect_batch(
     page_numbers = [p[0] for p in page_batch]
     page_range = ", ".join(str(n) for n in page_numbers)
 
-    prompt_text = VISUAL_INSPECTION_PROMPT.format(
+    system_prompt = VISUAL_INSPECTION_PROMPT.format(
         page_range=page_range,
         file_type=file_type,
         total_pages=total_pages,
@@ -116,23 +122,18 @@ async def _inspect_batch(
         image_bytes = await asyncio.to_thread(Path(img_path).read_bytes)
         parts.append(Part.from_bytes(data=image_bytes, mime_type="image/png"))
         parts.append(Part.from_text(text=f"[Page {page_num}]"))
-    parts.append(Part.from_text(text=prompt_text))
-
-    from app.core.config import settings
-    from app.core.retry import with_retry
 
     async def _call_gemini() -> str:
-        resp = await asyncio.wait_for(
-            asyncio.to_thread(
-                ai_client.models.generate_content,
-                model=model,
-                contents=Content(parts=parts),
-                config=GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=1.0,  # Recommended for Gemini 3
-                ),
+        resp = await ai_client.aio.models.generate_content(
+            model=model,
+            contents=Content(parts=parts),
+            config=GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=1.0,  # Recommended for Gemini 3
+                top_p=0.9,
+                thinking_config=ThinkingConfig(thinking_level=ThinkingLevel.HIGH),
+                system_instruction=system_prompt,
             ),
-            timeout=settings.AI_API_TIMEOUT_SECONDS,
         )
         return resp.text or ""
 
@@ -172,12 +173,12 @@ def _parse_visual_response(
             if issue:
                 issues.append(issue)
 
-        result.append(PageDiagnosis(page=page_num, issues=issues))
+        result = [*result, PageDiagnosis(page=page_num, issues=issues)]
 
     # Add empty diagnoses for pages not in response
     for pn in page_numbers:
         if pn not in seen_pages:
-            result.append(PageDiagnosis(page=pn))
+            result = [*result, PageDiagnosis(page=pn)]
 
     result.sort(key=lambda p: p.page)
     return result

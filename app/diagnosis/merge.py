@@ -1,14 +1,16 @@
 """Merge visual and structural diagnosis results into unified output."""
 
-from __future__ import annotations
-
 import asyncio
 import json
 
+from google.genai.types import GenerateContentConfig, ThinkingConfig, ThinkingLevel
+
+from app.core.ai import ai_client
 from app.core.config import settings
 from app.core.effort import EffortConfig
 from app.core.log import logger
 from app.core.prompts import MERGE_DIAGNOSIS_PROMPT
+from app.core.retry import with_retry
 from app.schema.diagnosis import (
     DiagnosisIssue,
     DiagnosisSummary,
@@ -54,13 +56,13 @@ def merge_diagnoses(
     merged_pages: list[PageDiagnosis] = []
     for page_num in sorted(page_issues.keys()):
         deduped = _deduplicate_issues(page_issues[page_num])
-        merged_pages.append(PageDiagnosis(page=page_num, issues=deduped))
+        merged_pages = [*merged_pages, PageDiagnosis(page=page_num, issues=deduped)]
 
     # Include pages with no issues (from visual scan)
     seen_pages = {p.page for p in merged_pages}
     for vp in visual_pages:
         if vp.page not in seen_pages:
-            merged_pages.append(PageDiagnosis(page=vp.page))
+            merged_pages = [*merged_pages, PageDiagnosis(page=vp.page, issues=[])]
     merged_pages.sort(key=lambda p: p.page)
 
     # Compute summary
@@ -89,12 +91,8 @@ async def merge_diagnoses_ai(
 ) -> DocumentDiagnosis:
     """AI-assisted merge using Gemini (or Claude if enabled) for Thorough effort level."""
     # Serialize findings for the prompt
-    visual_json = json.dumps(
-        [p.model_dump() for p in visual_pages], indent=2
-    )
-    structural_json = json.dumps(
-        [i.model_dump() for i in structural_issues], indent=2
-    )
+    visual_json = json.dumps([p.model_dump() for p in visual_pages], indent=2)
+    structural_json = json.dumps([i.model_dump() for i in structural_issues], indent=2)
 
     prompt = MERGE_DIAGNOSIS_PROMPT.format(
         visual_findings=visual_json,
@@ -102,8 +100,6 @@ async def merge_diagnoses_ai(
     )
 
     try:
-        from app.core.retry import with_retry
-
         # Use Anthropic if explicitly enabled, otherwise use Gemini
         if settings.USE_ANTHROPIC_AI:
             raw_text = await _call_claude_merge(prompt, config, job_id)
@@ -112,39 +108,39 @@ async def merge_diagnoses_ai(
 
         data = json.loads(raw_text)
         return _parse_ai_merge_response(
-            data, job_id, effort_level, file_type, page_count,
+            data,
+            job_id,
+            effort_level,
+            file_type,
+            page_count,
         )
     except Exception:
-        logger.exception(
-            f"Job {job_id}: AI merge failed, falling back to rule-based merge"
-        )
+        logger.exception(f"Job {job_id}: AI merge failed, falling back to rule-based merge")
         return merge_diagnoses(
-            visual_pages, structural_issues,
-            job_id, effort_level, file_type, page_count,
+            visual_pages,
+            structural_issues,
+            job_id,
+            effort_level,
+            file_type,
+            page_count,
         )
 
 
 async def _call_gemini_merge(prompt: str, config: EffortConfig, job_id: str) -> str:
     """Call Gemini for diagnosis merge."""
-    from google.genai.types import GenerateContentConfig
-
-    from app.core.ai import ai_client
-    from app.core.retry import with_retry
 
     model = config.visual_model or "gemini-3-flash-preview"
 
     async def _do_call() -> str:
-        resp = await asyncio.wait_for(
-            asyncio.to_thread(
-                ai_client.models.generate_content,
-                model=model,
-                contents=prompt,
-                config=GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=1.0,  # Recommended for Gemini 3
-                ),
+        resp = await ai_client.aio.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=1.0,  # Recommended for Gemini 3
+                top_p=0.9,
+                thinking_config=ThinkingConfig(thinking_level=ThinkingLevel.HIGH),
             ),
-            timeout=settings.AI_API_TIMEOUT_SECONDS,
         )
         return resp.text or ""
 
@@ -158,8 +154,8 @@ async def _call_gemini_merge(prompt: str, config: EffortConfig, job_id: str) -> 
 
 async def _call_claude_merge(prompt: str, config: EffortConfig, job_id: str) -> str:
     """Call Claude for diagnosis merge (only if explicitly enabled)."""
-    from app.core.ai import extract_anthropic_text, get_anthropic_client
-    from app.core.retry import with_retry
+    from app.core.ai import extract_anthropic_text, get_anthropic_client  # noqa: PLC0415
+    # from app.core.retry import with_retry
 
     client = get_anthropic_client()
     if not client:
@@ -198,16 +194,14 @@ def _deduplicate_issues(issues: list[DiagnosisIssue]) -> list[DiagnosisIssue]:
         if key in seen:
             existing = seen[key]
             # Keep the one with higher confidence
-            if issue.confidence > existing.confidence:
-                winner = issue
-            else:
-                winner = existing
+            winner = issue if issue.confidence > existing.confidence else existing
             # Mark as merged if sources differ
             if issue.source != existing.source:
                 seen[key] = DiagnosisIssue(
                     type=winner.type,
                     severity=min(
-                        issue.severity, existing.severity,
+                        issue.severity,
+                        existing.severity,
                         key=lambda s: _SEVERITY_ORDER[s],
                     ),
                     source=IssueSource.merged,
@@ -273,10 +267,12 @@ def _parse_ai_merge_response(
             issue = _safe_parse_issue(issue_data, page_data.get("page"))
             if issue:
                 issues.append(issue)
-        pages.append(PageDiagnosis(
-            page=page_data.get("page", 0),
-            issues=issues,
-        ))
+        pages.append(
+            PageDiagnosis(
+                page=page_data.get("page", 0),
+                issues=issues,
+            )
+        )
 
     doc_issues = []
     for issue_data in data.get("document_issues", []):
@@ -311,5 +307,5 @@ def _safe_parse_issue(data: dict, page: int | None) -> DiagnosisIssue | None:
             suggested_fix=data.get("suggested_fix"),
             confidence=max(0.0, min(1.0, float(data.get("confidence", 0.7)))),
         )
-    except (ValueError, KeyError):
+    except ValueError, KeyError:
         return None

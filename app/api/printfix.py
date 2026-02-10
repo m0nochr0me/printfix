@@ -39,7 +39,6 @@ router = APIRouter(
 )
 
 
-
 @router.get("/auth", tags=["Management"])
 async def auth() -> dict[str, str]:
     """
@@ -78,7 +77,7 @@ async def list_jobs() -> list[JobResponse]:
                     error=j.get("error"),
                 )
             )
-        except (KeyError, ValueError):
+        except KeyError, ValueError:
             continue
     return results
 
@@ -235,7 +234,11 @@ async def get_diagnosis(job_id: str) -> DiagnosisResponse:
         raise HTTPException(status_code=404, detail="Job not found")
 
     pre_diagnosis_states = (
-        "uploaded", "ingesting", "converting", "rendering", "ingested",
+        "uploaded",
+        "ingesting",
+        "converting",
+        "rendering",
+        "ingested",
     )
     if job["status"] in pre_diagnosis_states:
         raise HTTPException(
@@ -257,6 +260,7 @@ async def get_diagnosis(job_id: str) -> DiagnosisResponse:
         )
 
     import aiofiles
+
     async with aiofiles.open(diagnosis_path, "r") as f:
         diagnosis_data = json.loads(await f.read())
 
@@ -323,8 +327,13 @@ async def get_orchestration(job_id: str) -> OrchestrationResponse:
         raise HTTPException(status_code=404, detail="Job not found")
 
     pre_fix_states = (
-        "uploaded", "ingesting", "converting", "rendering",
-        "ingested", "diagnosing", "diagnosed",
+        "uploaded",
+        "ingesting",
+        "converting",
+        "rendering",
+        "ingested",
+        "diagnosing",
+        "diagnosed",
     )
     if job["status"] in pre_fix_states:
         return OrchestrationResponse(
@@ -370,12 +379,12 @@ async def approve_job(job_id: str) -> dict:
     if job["status"] not in ("needs_review", "verifying"):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Cannot approve from status: {job['status']}. "
-            f"Job must be in 'needs_review' or 'verifying' state.",
+            detail=f"Cannot approve from status: {job['status']}. Job must be in 'needs_review' or 'verifying' state.",
         )
 
     await JobStateManager.set_state(
-        job_id, "done",
+        job_id,
+        "done",
         extra={"manually_approved": "true"},
     )
     return {"job_id": job_id, "status": "done", "message": "Job approved"}
@@ -396,7 +405,8 @@ async def reject_job(job_id: str) -> dict:
         )
 
     await JobStateManager.set_state(
-        job_id, "needs_review",
+        job_id,
+        "needs_review",
         extra={"rejected": "true"},
     )
     return {"job_id": job_id, "status": "needs_review", "message": "Job rejected for review"}
@@ -420,8 +430,7 @@ async def download_job(
     if job["status"] not in ("done", "needs_review"):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Cannot download from status: {job['status']}. "
-            f"Job must be in 'done' or 'needs_review' state.",
+            detail=f"Cannot download from status: {job['status']}. Job must be in 'done' or 'needs_review' state.",
         )
 
     from app.core.storage import get_job_dir
