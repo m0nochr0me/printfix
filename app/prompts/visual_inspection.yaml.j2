@@ -1,0 +1,32 @@
+description: Print Quality Inspection
+version: '2.0.2'
+context:
+  pages_selected: {{ page_range }}
+  total_pages: {{ total_pages }}
+  document_type: {{ file_type }}
+issue_types:
+  - clipped_content: content cut off at page edges
+  - margin_violation: text or elements too close to page edges (< 0.3 inch)
+  - orphan_widow: single lines stranded at top or bottom of page
+  - misaligned_elements: headers, columns, or images not properly aligned
+  - image_overflow: images crossing page boundaries or extending beyond margins
+    - critical: large images (>20% of page) with significant clipping (>10% cut off)
+    - warning: medium images (5-20% of page) with moderate overflow (5-10% cut off)
+    - info: small decorative images (<5% of page) slightly near margins
+  - text_overflow: text blocks extending beyond page boundaries or margins
+    - critical: body text overflowing (>10% cut off)
+    - warning: headings or subheadings overflowing (5-10% cut off)
+    - info: footnotes or captions slightly near margins
+  - small_font: font size below recommended minimum (e.g., < 8pt)
+  - wrong_orientation: pages rotated incorrectly (e.g., landscape vs portrait)
+  - blank_pages: unexpected empty or near-empty pages in document (accidental page breaks)
+  - visual_inconsistency: mixed fonts, erratic spacing, or style mismatches
+severity_levels:
+  - critical: Issues that severely impact print quality and must be fixed before printing.
+  - warning: Issues that may affect print quality and should be reviewed.
+  - info: Minor issues that are unlikely to impact print quality but worth noting.
+guidelines:
+  - For each page, check all defined issue types.
+important: 
+  - When assessing image_overflow, estimate the image size relative to the page and the severity of clipping. Small logos or decorative elements near margins are typically 'info' level unless they are clearly cut off.
+goal: Analyze the provided document page images and identify any issues that would affect print quality.

@@ -1,0 +1,22 @@
+description: Print Quality Inspection Verification
+version: '2.0'
+context:
+  before_pages: {{ before_images }}
+  after_pages: {{ after_images }}
+guidelines: |
+    You have been shown BEFORE and AFTER images of document pages that were \
+    automatically fixed for print readiness. Compare them and assess the overall \
+    print quality of the AFTER versions.
+    For each page pair, evaluate:
+    - Has the content been preserved? (text, images, tables all intact)
+    - Are the margins and spacing now appropriate for printing?
+    - Is text legible and properly sized?
+    - Are tables and images properly contained within page boundaries?
+    - Has the overall layout improved or at least not degraded?
+scoring_guide: |
+- 90-100: Excellent print quality, all issues resolved, no degradation
+- 70-89: Good quality, most issues fixed, minor concerns remain
+- 50-69: Acceptable but noticeable issues persist
+- 30-49: Poor quality, significant issues remain or fixes introduced new problems
+- 0-29: Fixes made the document worse or content was lost
+goal: Perform a final quality check.

@@ -1,0 +1,14 @@
+description: Print Quality Diagnosis System
+version: '2.0'
+context:
+  document_type: {{ file_type }}
+  total_pages: {{ total_pages }}
+  visual_findings: |
+    {{ visual_findings | indent(4) }}
+  structural_findings: |
+    {{ structural_findings | indent(4) }}
+guidelines:
+  - If both visual and structural analysis found the same issue, keep ONE entry with the higher confidence and source="merged"
+  - Issues are duplicates if they share the same page AND issue type AND describe the same underlying problem
+  - Assign final severity based on practical print impact
+  - Order issues by severity (critical first), then by page number
