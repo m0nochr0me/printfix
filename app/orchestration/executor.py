@@ -2,8 +2,6 @@
 Fix executor — maps tool names to fix functions and runs them.
 """
 
-from __future__ import annotations
-
 import asyncio
 from datetime import UTC, datetime
 from typing import Any, Callable, Coroutine
@@ -11,21 +9,23 @@ from typing import Any, Callable, Coroutine
 from app.core.config import settings
 from app.core.log import logger
 from app.fixes.common import re_render_job, record_fix, resolve_document
+from app.fixes.images import check_image_dpi, convert_pdf_colorspace, resize_images_to_fit
 from app.fixes.page_breaks import fix_page_breaks, remove_manual_breaks
 from app.fixes.page_layout import (
+    adjust_paragraph_indents,
     remove_blank_pages,
     set_margins,
     set_orientation,
     set_page_size,
 )
-from app.fixes.images import check_image_dpi, convert_pdf_colorspace, resize_images_to_fit
 from app.fixes.pdf_fallback import pdf_crop_margins, pdf_rotate_pages, pdf_scale_content
 from app.fixes.pptx import adjust_pptx_font_size, set_pptx_slide_size
-from app.fixes.xlsx import auto_fit_xlsx_columns, set_xlsx_margins, set_xlsx_page_setup
 from app.fixes.tables import auto_fit_tables, resize_table_text
 from app.fixes.typography import adjust_font_size, replace_font
+from app.fixes.xlsx import auto_fit_xlsx_columns, set_xlsx_margins, set_xlsx_page_setup
 from app.schema.fix import FixResult
 from app.schema.orchestration import FixAction
+from app.worker.job_state import JobStateManager
 
 __all__ = ("execute_fix", "execute_plan")
 
@@ -37,6 +37,7 @@ FixFunc = Callable[..., Coroutine[Any, Any, FixResult]]
 # Maps tool_name → (fix_function, is_pdf_tool)
 TOOL_REGISTRY: dict[str, tuple[FixFunc, bool]] = {
     # DOCX tools
+    "adjust_paragraph_indents": (adjust_paragraph_indents, False),
     "set_margins": (set_margins, False),
     "set_page_size": (set_page_size, False),
     "set_orientation": (set_orientation, False),
@@ -169,7 +170,6 @@ async def execute_plan(
 
 async def _get_pdf_path(job_id: str) -> str:
     """Get the reference PDF path for a job."""
-    from app.worker.job_state import JobStateManager
 
     job = await JobStateManager.get_job(job_id)
     if not job:

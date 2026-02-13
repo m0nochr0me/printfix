@@ -31,6 +31,12 @@ __all__ = ("plan_fixes",)
 _DOCX_ISSUE_MAP: dict[str, list[FixAction]] = {
     "margin_violation": [
         FixAction(
+            tool_name="adjust_paragraph_indents",
+            params={"left_inches": 0.2, "right_inches": 0.2, "first_line_inches": 0.0},
+            target_issues=["inconsistent_indent"],
+            reasoning="Cap excessive paragraph indents to reclaim printable space",
+        ),
+        FixAction(
             tool_name="set_margins",
             params={"top": 0.75, "bottom": 0.75, "left": 0.75, "right": 0.75},
             target_issues=["margin_violation"],
@@ -152,7 +158,7 @@ _DOCX_ISSUE_MAP: dict[str, list[FixAction]] = {
     "inconsistent_indent": [
         FixAction(
             tool_name="adjust_paragraph_indents",
-            params={"max_left_inches": 0.5, "max_right_inches": 0.5, "max_first_line_inches": 0.5},
+            params={"left_inches": 0.5, "right_inches": 0.5, "first_line_inches": 0.5},
             target_issues=["inconsistent_indent"],
             reasoning="Cap excessive paragraph indents to reclaim printable space",
         ),

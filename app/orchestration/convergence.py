@@ -2,8 +2,6 @@
 Convergence detection — decides when the fix loop should stop.
 """
 
-from __future__ import annotations
-
 from app.schema.orchestration import ConvergenceState
 
 __all__ = ("should_stop",)

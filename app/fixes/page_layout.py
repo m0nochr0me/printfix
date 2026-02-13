@@ -192,9 +192,9 @@ def _remove_blank_pages_sync(file_path: str, job_id: str) -> FixResult:
 async def adjust_paragraph_indents(
     file_path: str,
     job_id: str,
-    max_left_inches: float = 0.5,
-    max_right_inches: float = 0.5,
-    max_first_line_inches: float = 0.5,
+    left_inches: float = 0.5,
+    right_inches: float = 0.5,
+    first_line_inches: float = 0.5,
     strategy: str = "cap",
 ) -> FixResult:
     """Adjust paragraph indents in a DOCX. Strategy: 'cap' or 'scale'.
@@ -206,9 +206,9 @@ async def adjust_paragraph_indents(
         _adjust_paragraph_indents_sync,
         file_path,
         job_id,
-        max_left_inches,
-        max_right_inches,
-        max_first_line_inches,
+        left_inches,
+        right_inches,
+        first_line_inches,
         strategy,
     )
 
@@ -216,16 +216,16 @@ async def adjust_paragraph_indents(
 def _adjust_paragraph_indents_sync(
     file_path: str,
     job_id: str,
-    max_left_inches: float,
-    max_right_inches: float,
-    max_first_line_inches: float,
+    left_inches: float,
+    right_inches: float,
+    first_line_inches: float,
     strategy: str,
 ) -> FixResult:
 
     doc = Document(file_path)
-    max_left = Inches(max_left_inches)
-    max_right = Inches(max_right_inches)
-    max_first = Inches(max_first_line_inches)
+    max_left = Inches(left_inches)
+    max_right = Inches(right_inches)
+    max_first = Inches(first_line_inches)
 
     # Collect all paragraphs (body + table cells)
     all_paras: list = list(doc.paragraphs)
@@ -345,10 +345,10 @@ def _adjust_paragraph_indents_sync(
         success=True,
         description=(
             f"Adjusted indents on {adjusted} paragraph(s) using '{strategy}' strategy"
-            f' (max L={max_left_inches}" R={max_right_inches}" FL={max_first_line_inches}")'
+            f' (max L={left_inches}" R={right_inches}" FL={first_line_inches}")'
         ),
         before_value="max " + " ".join(before_parts),
-        after_value=f'cap L={max_left_inches}" R={max_right_inches}" FL={max_first_line_inches}"',
+        after_value=f'cap L={left_inches}" R={right_inches}" FL={first_line_inches}"',
     )
 
 
