@@ -152,6 +152,16 @@ The AI agent acts as the conductor. It reads the diagnosis, selects appropriate 
 - `embed_fonts(doc)` — embed all used fonts into the document
 - `adjust_font_size(doc, selector, new_size)` — resize text in a section/style
 - `fix_orphans_widows(doc, strategy)` — adjust spacing to eliminate orphans/widows
+- `set_widow_orphan_control(doc, enable)` — toggle paragraph widow/orphan control
+- `normalize_paragraph_spacing(doc, before_pt, after_pt)` — standardize paragraph spacing
+- `set_line_spacing(doc, spacing, rule)` — force consistent line spacing
+- `normalize_styles(doc, target_font, target_size)` — unify body text formatting
+
+**Document Cleanup (DOCX)**
+
+- `accept_tracked_changes(doc)` — accept all tracked changes
+- `strip_hidden_text(doc)` — remove hidden text runs
+- `remove_empty_paragraphs(doc, max_consecutive)` — collapse empty paragraph runs
 
 **Tables**
 
@@ -162,7 +172,7 @@ The AI agent acts as the conductor. It reads the diagnosis, selects appropriate 
 **Images**
 
 - `convert_colorspace(doc, target)` — RGB to CMYK conversion
-- `check_image_dpi(doc, min_dpi)` — flag or upscale low-res images
+- `check_image_dpi(doc, min_dpi)` — flag low-res images (diagnostic only)
 - `resize_image_to_fit(doc, image_index)` — scale image within page bounds
 
 **Page Breaks**
@@ -170,11 +180,31 @@ The AI agent acts as the conductor. It reads the diagnosis, selects appropriate 
 - `fix_page_breaks(doc, strategy)` — reflow content with smarter break points
 - `remove_manual_breaks(doc)` — strip hard page breaks, let content reflow
 
+**XLSX Tools**
+
+- `set_xlsx_margins(sheet, top, bottom, left, right)` — set print margins
+- `set_xlsx_page_setup(sheet, orientation, paper_size, fit_to_page)` — page setup
+- `auto_fit_xlsx_columns(sheet, max_col_width, shrink_margins)` — auto-size columns
+- `adjust_xlsx_font_size(sheet, min_size_pt, max_size_pt)` — clamp cell font sizes
+- `replace_xlsx_font(sheet, from_font, to_font)` — substitute fonts in cells
+- `set_xlsx_print_area(sheet, area)` — set print area on sheets
+- `scale_xlsx_row_heights(sheet, auto_fit)` — auto-fit row heights to content
+
+**PPTX Tools**
+
+- `set_pptx_slide_size(doc, width, height)` — set slide dimensions
+- `adjust_pptx_font_size(doc, min_size_pt)` — enforce minimum font size
+- `reposition_pptx_shapes(doc, margin_inches)` — move shapes inside printable area
+- `replace_pptx_font(doc, from_font, to_font)` — substitute fonts in slides
+- `resize_pptx_text_boxes(doc, strategy)` — grow boxes or shrink text to fit
+
 **PDF-Specific Fallbacks**
 
 - `pdf_crop_margins(pdf, margins)` — adjust PDF crop/media boxes
 - `pdf_scale_content(pdf, scale_factor)` — scale all content to fit
 - `pdf_rotate_pages(pdf, pages, angle)` — rotate specific pages
+- `pdf_normalize_page_sizes(pdf, width, height)` — standardize page dimensions
+- `pdf_embed_fonts(pdf)` — subset-embed non-embedded fonts
 - `pdf_overlay_fix(pdf, page, overlay)` — patch a page with corrected content
 
 ### Fix Loop
@@ -383,3 +413,50 @@ printfix/
 - [x] Simple web frontend for file upload and job status tracking
 - [x] Display diagnosis summary, confidence score, fix report
 - [x] Preview before/after page images
+
+### Phase 9 — Extended Fix Tools
+
+Close diagnosis-to-fix gaps identified by coverage audit. Prioritized by impact (issues that are diagnosed today but have no fix path).
+
+#### 9a — DOCX Document Cleanup
+
+- [ ] `accept_tracked_changes(doc)` — Accept all tracked changes (unwrap `w:ins`, remove `w:del` elements). Resolves `tracked_changes` issue type. Tracked changes cause rendering artifacts, phantom spacing, and unexpected content in printed output.
+- [ ] `strip_hidden_text(doc)` — Remove text runs marked with `w:vanish`. Resolves `hidden_content` issue type. Hidden text can cause phantom page breaks and vertical spacing anomalies.
+- [ ] `remove_empty_paragraphs(doc, max_consecutive)` — Collapse runs of empty paragraphs down to at most `max_consecutive` (default 1). Finer-grained than `remove_blank_pages`; recovers wasted vertical space without removing real page breaks.
+
+#### 9b — DOCX Typography & Spacing
+
+- [ ] `set_widow_orphan_control(doc, enable)` — Set `widowControl` paragraph property on all paragraphs. Resolves `orphan_widow` issue type (diagnosed visually, currently unfixable). When enabled, Word prevents single lines at top/bottom of pages.
+- [ ] `normalize_paragraph_spacing(doc, before_pt, after_pt)` — Standardize `spaceAfter` / `spaceBefore` on body paragraphs to consistent values. Addresses `visual_inconsistency` (erratic spacing). Optionally target specific styles.
+- [ ] `set_line_spacing(doc, spacing, rule)` — Force consistent line spacing (single / 1.15 / 1.5 / double) across paragraphs. Addresses `visual_inconsistency` and can recover vertical space when pages are tight.
+
+#### 9c — XLSX Fixes
+
+- [ ] `adjust_xlsx_font_size(sheet, min_size_pt, max_size_pt)` — Clamp cell font sizes to a min/max range. Resolves `small_font` diagnosed for XLSX (currently only fixable in DOCX).
+- [ ] `replace_xlsx_font(sheet, from_font, to_font)` — Replace fonts across all cells in a workbook. Resolves `non_embedded_font` for XLSX.
+- [ ] `set_xlsx_print_area(sheet, area)` — Set print area on sheets that lack one (auto-detect used range if `area` is omitted). Resolves `no_print_area` issue type.
+- [ ] `scale_xlsx_row_heights(sheet, auto_fit)` — Auto-fit row heights to cell content. Complements `auto_fit_xlsx_columns` — currently columns are handled but rows are not, causing clipped cell text in print.
+
+#### 9d — PPTX Fixes
+
+- [ ] `reposition_pptx_shapes(doc, margin_inches)` — Move shapes/text boxes that extend beyond the printable area back inside slide bounds (shift inward, preserving relative layout). Resolves `text_outside_printable` — PPTX-specific issue with zero fix capability today.
+- [ ] `replace_pptx_font(doc, from_font, to_font)` — Replace fonts across all text frames and table cells in a presentation. Resolves `non_embedded_font` for PPTX.
+- [ ] `resize_pptx_text_boxes(doc, strategy)` — Enlarge text boxes that are too small for their content, or enable auto-shrink. Strategy: `grow` (expand box) or `shrink_text` (enable auto-size). More nuanced than `adjust_pptx_font_size` alone.
+
+#### 9e — PDF Enhancements
+
+- [ ] `pdf_normalize_page_sizes(pdf, target_width, target_height)` — Make all pages the same size (e.g., A4) by adjusting MediaBox and scaling content proportionally. Resolves `page_size_mismatch` for PDFs (currently only fixable in DOCX). Achievable with pikepdf.
+- [ ] `pdf_embed_fonts(pdf)` — Subset-embed non-embedded fonts using fonttools/pikepdf. Resolves `non_embedded_font` at critical severity for PDFs. Technically complex — may require font file resolution and subsetting.
+
+#### 9f — Planner & Diagnosis Wiring
+
+- [ ] Add new tools to `TOOL_REGISTRY` in `executor.py`
+- [ ] Add issue type → tool mappings in `planner.py` (`_DOCX_ISSUE_MAP`, `_XLSX_ISSUE_MAP`, `_PDF_ISSUE_MAP`, and new `_PPTX_ISSUE_MAP`)
+- [ ] Add new tools to `fix_planning.yaml.j2` prompt (available_fix_tools section)
+- [ ] Add MCP tool wrappers in `context/printfix.py`
+- [ ] Wire `bad_page_break` issue type into DOCX structural analysis or remove dead enum value
+- [ ] Reclassify `check_image_dpi` as diagnostic-only (remove from fix plans, surface as advisory)
+
+#### 9g — Visual Consistency (AI-Assisted)
+
+- [ ] `normalize_styles(doc, target_body_font, target_body_size_pt)` — Force body-text paragraphs to a consistent style (font family, size, line spacing) while preserving heading hierarchy. Addresses `visual_inconsistency` for documents with chaotic formatting from copy-paste. Requires style detection heuristics to distinguish headings from body text.
