@@ -2,8 +2,6 @@
 Verification and confidence scoring models.
 """
 
-from __future__ import annotations
-
 from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
@@ -26,19 +24,27 @@ class ConfidenceBreakdown(BaseModel):
 
     base_score: float = Field(ge=0.0, le=100.0, description="Base score from issue resolution")
     convergence_bonus: float = Field(
-        ge=-20.0, le=20.0, default=0.0,
+        ge=-20.0,
+        le=20.0,
+        default=0.0,
         description="Bonus/penalty from convergence quality",
     )
     severity_penalty: float = Field(
-        ge=-50.0, le=0.0, default=0.0,
+        ge=-50.0,
+        le=0.0,
+        default=0.0,
         description="Penalty for remaining critical/warning issues",
     )
     visual_score: float = Field(
-        ge=0.0, le=100.0, default=100.0,
+        ge=0.0,
+        le=100.0,
+        default=100.0,
         description="AI visual quality assessment (0-100)",
     )
     visual_weight: float = Field(
-        ge=0.0, le=1.0, default=0.3,
+        ge=0.0,
+        le=1.0,
+        default=0.3,
         description="Weight given to visual score",
     )
     final_score: float = Field(ge=0.0, le=100.0)
@@ -103,3 +109,10 @@ class VerificationResponse(BaseModel):
     job_id: str
     status: str
     verification: VerificationResult | None = None
+
+
+class VerificationFindings(BaseModel):
+    """Overall score and findings from verification."""
+
+    overall_score: int = Field(description="Overall quality score", ge=0, le=100)
+    summary: str = Field(description="Summary of findings from verification", max_length=2000)

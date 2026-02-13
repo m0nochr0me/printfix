@@ -1,9 +1,6 @@
 """Structural analysis for PDF files using pikepdf."""
 
-from __future__ import annotations
-
 import asyncio
-import math
 
 import pikepdf
 
@@ -55,21 +52,21 @@ def _check_page_sizes(pdf: pikepdf.Pdf) -> list[DiagnosisIssue]:
         sizes.append((round(w, 1), round(h, 1)))
 
     first_size = sizes[0]
-    mismatched = [
-        i + 1 for i, s in enumerate(sizes) if s != first_size
-    ]
+    mismatched = [i + 1 for i, s in enumerate(sizes) if s != first_size]
     if mismatched:
-        issues.append(DiagnosisIssue(
-            type=IssueType.page_size_mismatch,
-            severity=IssueSeverity.warning,
-            source=IssueSource.structural,
-            description=(
-                f"Inconsistent page sizes: pages {mismatched} differ from "
-                f"page 1 ({first_size[0]/72:.1f}x{first_size[1]/72:.1f} in)"
-            ),
-            suggested_fix="set_page_size",
-            confidence=0.95,
-        ))
+        issues.append(
+            DiagnosisIssue(
+                type=IssueType.page_size_mismatch,
+                severity=IssueSeverity.warning,
+                source=IssueSource.structural,
+                description=(
+                    f"Inconsistent page sizes: pages {mismatched} differ from "
+                    f"page 1 ({first_size[0] / 72:.1f}x{first_size[1] / 72:.1f} in)"
+                ),
+                suggested_fix="set_page_size",
+                confidence=0.95,
+            )
+        )
 
     return issues
 
@@ -79,7 +76,7 @@ def _check_fonts(pdf: pikepdf.Pdf) -> list[DiagnosisIssue]:
     issues: list[DiagnosisIssue] = []
     non_embedded: set[str] = set()
 
-    for page_num, page in enumerate(pdf.pages, 1):
+    for _page_num, page in enumerate(pdf.pages, 1):
         resources = page.get("/Resources")
         if not resources:
             continue
@@ -103,11 +100,7 @@ def _check_fonts(pdf: pikepdf.Pdf) -> list[DiagnosisIssue]:
                         non_embedded.add(base_font)
                     continue
 
-                has_file = (
-                    "/FontFile" in descriptor
-                    or "/FontFile2" in descriptor
-                    or "/FontFile3" in descriptor
-                )
+                has_file = "/FontFile" in descriptor or "/FontFile2" in descriptor or "/FontFile3" in descriptor
                 if not has_file:
                     base_font = str(font_obj.get("/BaseFont", font_name))
                     non_embedded.add(base_font)
@@ -115,14 +108,17 @@ def _check_fonts(pdf: pikepdf.Pdf) -> list[DiagnosisIssue]:
                 continue
 
     for font_name in non_embedded:
-        issues.append(DiagnosisIssue(
-            type=IssueType.non_embedded_font,
-            severity=IssueSeverity.critical,
-            source=IssueSource.structural,
-            description=f"Font '{font_name}' is not embedded — may render differently on print server",
-            suggested_fix="embed_fonts",
-            confidence=0.9,
-        ))
+        issues = [
+            *issues,
+            DiagnosisIssue(
+                type=IssueType.non_embedded_font,
+                severity=IssueSeverity.critical,
+                source=IssueSource.structural,
+                description=f"Font '{font_name}' is not embedded — may render differently on print server",
+                suggested_fix="embed_fonts",
+                confidence=0.9,
+            ),
+        ]
 
     return issues
 
@@ -167,22 +163,23 @@ def _check_images(pdf: pikepdf.Pdf) -> list[DiagnosisIssue]:
                 effective_dpi = min(dpi_x, dpi_y)
 
                 if effective_dpi < min_dpi:
-                    severity = (
-                        IssueSeverity.critical if effective_dpi < 72
-                        else IssueSeverity.warning
+                    # severity = (
+                    #     IssueSeverity.critical if effective_dpi < 72
+                    #     else IssueSeverity.warning
+                    # )
+                    issues.append(
+                        DiagnosisIssue(
+                            type=IssueType.low_dpi_image,
+                            severity=IssueSeverity.info,
+                            source=IssueSource.structural,
+                            page=page_num,
+                            description=(
+                                f"Image '{name}' has ~{effective_dpi:.0f} DPI (minimum {min_dpi} recommended for print)"
+                            ),
+                            suggested_fix="check_image_dpi",
+                            confidence=0.7,
+                        )
                     )
-                    issues.append(DiagnosisIssue(
-                        type=IssueType.low_dpi_image,
-                        severity=severity,
-                        source=IssueSource.structural,
-                        page=page_num,
-                        description=(
-                            f"Image '{name}' has ~{effective_dpi:.0f} DPI "
-                            f"(minimum {min_dpi} recommended for print)"
-                        ),
-                        suggested_fix="check_image_dpi",
-                        confidence=0.7,
-                    ))
             except Exception:
                 continue
 
@@ -218,14 +215,16 @@ def _check_colorspaces(pdf: pikepdf.Pdf) -> list[DiagnosisIssue]:
             break
 
     if has_rgb:
-        issues.append(DiagnosisIssue(
-            type=IssueType.rgb_colorspace,
-            severity=IssueSeverity.info,
-            source=IssueSource.structural,
-            description="Document contains RGB images — CMYK recommended for professional print",
-            suggested_fix="convert_colorspace",
-            confidence=0.9,
-        ))
+        issues.append(
+            DiagnosisIssue(
+                type=IssueType.rgb_colorspace,
+                severity=IssueSeverity.info,
+                source=IssueSource.structural,
+                description="Document contains RGB images — CMYK recommended for professional print",
+                suggested_fix="convert_colorspace",
+                confidence=0.9,
+            )
+        )
 
     return issues
 
@@ -250,19 +249,21 @@ def _check_crop_boxes(pdf: pikepdf.Pdf) -> list[DiagnosisIssue]:
             w_ratio = cb_w / mb_w
             h_ratio = cb_h / mb_h
             if w_ratio < 0.95 or h_ratio < 0.95:
-                issues.append(DiagnosisIssue(
-                    type=IssueType.clipped_content,
-                    severity=IssueSeverity.warning,
-                    source=IssueSource.structural,
-                    page=page_num,
-                    description=(
-                        f"CropBox is significantly smaller than MediaBox "
-                        f"({w_ratio:.0%} width, {h_ratio:.0%} height) — "
-                        f"content may be hidden"
-                    ),
-                    suggested_fix="pdf_crop_margins",
-                    confidence=0.8,
-                ))
+                issues.append(
+                    DiagnosisIssue(
+                        type=IssueType.clipped_content,
+                        severity=IssueSeverity.warning,
+                        source=IssueSource.structural,
+                        page=page_num,
+                        description=(
+                            f"CropBox is significantly smaller than MediaBox "
+                            f"({w_ratio:.0%} width, {h_ratio:.0%} height) — "
+                            f"content may be hidden"
+                        ),
+                        suggested_fix="pdf_crop_margins",
+                        confidence=0.8,
+                    )
+                )
 
     return issues
 
@@ -270,11 +271,19 @@ def _check_crop_boxes(pdf: pikepdf.Pdf) -> list[DiagnosisIssue]:
 def _is_standard_font(base_font: str) -> bool:
     """Check if a font is one of the PDF standard 14 fonts."""
     standard = {
-        "/Courier", "/Courier-Bold", "/Courier-Oblique", "/Courier-BoldOblique",
-        "/Helvetica", "/Helvetica-Bold", "/Helvetica-Oblique", "/Helvetica-BoldOblique",
-        "/Times-Roman", "/Times-Bold", "/Times-Italic", "/Times-BoldItalic",
-        "/Symbol", "/ZapfDingbats",
+        "/Courier",
+        "/Courier-Bold",
+        "/Courier-Oblique",
+        "/Courier-BoldOblique",
+        "/Helvetica",
+        "/Helvetica-Bold",
+        "/Helvetica-Oblique",
+        "/Helvetica-BoldOblique",
+        "/Times-Roman",
+        "/Times-Bold",
+        "/Times-Italic",
+        "/Times-BoldItalic",
+        "/Symbol",
+        "/ZapfDingbats",
     }
-    return base_font in standard or base_font.lstrip("/") in {
-        s.lstrip("/") for s in standard
-    }
+    return base_font in standard or base_font.lstrip("/") in {s.lstrip("/") for s in standard}

@@ -2,8 +2,7 @@
 Worker tasks: ingest, convert, render, diagnose.
 """
 
-from __future__ import annotations
-
+import asyncio
 import json
 import os
 from hashlib import blake2s
@@ -11,19 +10,30 @@ from pathlib import Path
 from time import perf_counter
 
 import aiofiles
+import yaml
+from google.genai.types import GenerateContentConfig, ThinkingConfig, ThinkingLevel
 
+from app.core.ai import ai_client
 from app.core.cache import cache, make_cache_key
 from app.core.config import settings
 from app.core.effort import EffortConfig, get_effort_config
 from app.core.log import logger
+from app.core.prompts import get_prompt
 from app.core.rendering import convert_to_pdf, get_pdf_metadata, render_pages
+from app.core.retry import with_retry
 from app.core.storage import get_job_dir
 from app.diagnosis.merge import merge_diagnoses, merge_diagnoses_ai
 from app.diagnosis.structural_docx import analyze_docx
 from app.diagnosis.structural_pdf import analyze_pdf
 from app.diagnosis.visual import inspect_pages_visually
-from app.schema.diagnosis import DiagnosisIssue, DocumentDiagnosis
+from app.orchestration.orchestrator import run_fix_loop
+from app.schema.diagnosis import (
+    DiagnosisIssue,
+    DocumentDiagnosis,
+    StructuralFindings,
+)
 from app.schema.job import EffortLevel
+from app.verification import AUTO_APPROVE_THRESHOLD, run_verification
 from app.worker.broker import broker
 from app.worker.job_state import JobStateManager
 
@@ -42,8 +52,6 @@ async def fix_document(job_id: str) -> dict:
         await JobStateManager.set_state(job_id, "fixing")
         logger.info(f"Job {job_id}: starting fix orchestration")
 
-        from app.orchestration.orchestrator import run_fix_loop
-
         t0 = perf_counter()
         result = await run_fix_loop(job_id)
         logger.info(f"Job {job_id}: fix loop took {perf_counter() - t0:.1f}s")
@@ -56,7 +64,8 @@ async def fix_document(job_id: str) -> dict:
 
         # Transition to verifying and run Phase 5 verification
         await JobStateManager.set_state(
-            job_id, "verifying",
+            job_id,
+            "verifying",
             extra={
                 "orchestration_path": str(result_path),
                 "issues_fixed": str(result.total_fixes_applied),
@@ -66,7 +75,6 @@ async def fix_document(job_id: str) -> dict:
         )
 
         # Run verification: before/after rendering, confidence scoring, report
-        from app.verification import run_verification, AUTO_APPROVE_THRESHOLD
 
         t0 = perf_counter()
         verification = await run_verification(job_id)
@@ -77,7 +85,8 @@ async def fix_document(job_id: str) -> dict:
 
         if confidence >= AUTO_APPROVE_THRESHOLD:
             await JobStateManager.set_state(
-                job_id, "done",
+                job_id,
+                "done",
                 extra={
                     "confidence": str(confidence),
                     "print_readiness": readiness,
@@ -86,7 +95,8 @@ async def fix_document(job_id: str) -> dict:
             )
         else:
             await JobStateManager.set_state(
-                job_id, "needs_review",
+                job_id,
+                "needs_review",
                 extra={
                     "confidence": str(confidence),
                     "print_readiness": readiness,
@@ -142,7 +152,8 @@ async def ingest_document(job_id: str, file_path: str, original_filename: str) -
 
         file_size = os.path.getsize(file_path)
         await JobStateManager.set_state(
-            job_id, "ingesting",
+            job_id,
+            "ingesting",
             extra={"file_type": ext, "file_size_bytes": file_size},
         )
 
@@ -159,7 +170,8 @@ async def ingest_document(job_id: str, file_path: str, original_filename: str) -
 
         # -- Done ingesting --
         await JobStateManager.set_state(
-            job_id, "ingested",
+            job_id,
+            "ingested",
             extra={
                 "pdf_path": pdf_path,
                 "pages": metadata["page_count"],
@@ -168,10 +180,7 @@ async def ingest_document(job_id: str, file_path: str, original_filename: str) -
             },
         )
 
-        logger.info(
-            f"Job {job_id}: ingestion complete — "
-            f"{metadata['page_count']} pages rendered"
-        )
+        logger.info(f"Job {job_id}: ingestion complete — {metadata['page_count']} pages rendered")
 
         # -- Step 4: Auto-enqueue diagnosis --
         await diagnose_document.kiq(job_id=job_id)
@@ -224,10 +233,7 @@ async def diagnose_document(job_id: str) -> dict:
             return {"job_id": job_id, "status": "diagnosed", "cached": True}
 
         # -- Step 2: Visual inspection --
-        logger.info(
-            f"Job {job_id}: starting visual inspection "
-            f"({effort_config.visual_model})"
-        )
+        logger.info(f"Job {job_id}: starting visual inspection ({effort_config.visual_model})")
         t0 = perf_counter()
         visual_pages = await inspect_pages_visually(
             page_image_paths=page_images,
@@ -251,13 +257,22 @@ async def diagnose_document(job_id: str) -> dict:
         # -- Step 4: Merge --
         if effort_config.use_ai_merge:
             diagnosis = await merge_diagnoses_ai(
-                visual_pages, structural_issues,
-                job_id, str(effort), file_type, page_count, effort_config,
+                visual_pages,
+                structural_issues,
+                job_id,
+                str(effort),
+                file_type,
+                page_count,
+                effort_config,
             )
         else:
             diagnosis = merge_diagnoses(
-                visual_pages, structural_issues,
-                job_id, str(effort), file_type, page_count,
+                visual_pages,
+                structural_issues,
+                job_id,
+                str(effort),
+                file_type,
+                page_count,
             )
 
         # -- Step 5: Store and transition --
@@ -282,11 +297,13 @@ async def diagnose_document(job_id: str) -> dict:
         else:
             # No issues — skip fixing, mark as done
             await JobStateManager.set_state(
-                job_id, "fixing",
+                job_id,
+                "fixing",
                 extra={"issues_found": "0"},
             )
             await JobStateManager.set_state(
-                job_id, "verifying",
+                job_id,
+                "verifying",
                 extra={"confidence": "100.0"},
             )
             await JobStateManager.set_state(job_id, "done")
@@ -323,87 +340,107 @@ async def _run_structural_analysis(
         if docx_files:
             issues.extend(await analyze_docx(str(docx_files[0]), job_id))
     elif file_type == ".xlsx":
-        from app.diagnosis.structural_xlsx import analyze_xlsx
+        from app.diagnosis.structural_xlsx import analyze_xlsx  # noqa: PLC0415
 
         xlsx_files = list(original_dir.glob("*.xlsx"))
         if xlsx_files:
             issues.extend(await analyze_xlsx(str(xlsx_files[0]), job_id))
     elif file_type == ".pptx":
-        from app.diagnosis.structural_pptx import analyze_pptx
+        from app.diagnosis.structural_pptx import analyze_pptx  # noqa: PLC0415
 
         pptx_files = list(original_dir.glob("*.pptx"))
         if pptx_files:
             issues.extend(await analyze_pptx(str(pptx_files[0]), job_id))
 
-    # For Thorough: Claude structural review
-    if effort_config.use_claude_structural and issues:
-        issues = await _claude_structural_review(issues, effort_config, job_id)
+    if effort_config.use_structural_review and issues:
+        issues = await _structural_review(issues, effort_config, job_id)
 
     return issues
 
 
-async def _claude_structural_review(
+async def _structural_review(
     issues: list[DiagnosisIssue],
     effort_config: EffortConfig,
     job_id: str,
 ) -> list[DiagnosisIssue]:
-    """Use Claude to review and refine structural findings (Thorough only)."""
-    import asyncio
+    """Use AI to review and refine structural findings (Thorough only)."""
 
-    from app.core.ai import extract_anthropic_text, get_anthropic_client
-    from app.core.prompts import STRUCTURAL_REVIEW_PROMPT
+    system_prompt = get_prompt("structural_review").render(
+        file_type="document",
+    )
 
-    client = get_anthropic_client()
-    if not client:
-        logger.warning(
-            f"Job {job_id}: Anthropic client not configured, "
-            "skipping Claude structural review"
-        )
-        return issues
+    structural_issues = yaml.safe_dump(
+        [i.model_dump(mode="json") for i in issues],
+        sort_keys=False,
+        indent=2,
+        width=1024,
+        allow_unicode=True,
+        default_flow_style=False,
+    )
 
-    issues_json = json.dumps([i.model_dump() for i in issues], indent=2)
-    model = effort_config.claude_model or settings.ANTHROPIC_DIAGNOSIS_MODEL
+    prompt = f"structural findings:\n\n{structural_issues}\n\n"
 
     try:
-        prompt = STRUCTURAL_REVIEW_PROMPT.format(
-            file_type="document",
-            structural_data=issues_json,
-        )
-        response = await asyncio.to_thread(
-            client.messages.create,
-            model=model,
-            max_tokens=4096,
-            messages=[{"role": "user", "content": prompt}],
+        raw_text = await _call_gemini(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            effort_config=effort_config,
         )
 
-        raw_text = extract_anthropic_text(response)
-        data = json.loads(raw_text)
+        reviewed_findings = StructuralFindings.model_validate_json(raw_text)  # type: ignore
 
-        reviewed: list[DiagnosisIssue] = []
-        for item in data.get("reviewed_issues", []):
-            try:
-                from app.schema.diagnosis import IssueSeverity, IssueSource, IssueType
-                reviewed.append(DiagnosisIssue(
-                    type=IssueType(item["type"]),
-                    severity=IssueSeverity(item.get("severity", "warning")),
-                    source=IssueSource.structural,
-                    page=item.get("page"),
-                    location=item.get("location"),
-                    description=item.get("description", ""),
-                    suggested_fix=item.get("suggested_fix"),
-                    confidence=max(0.0, min(1.0, float(item.get("confidence", 0.7)))),
-                ))
-            except (ValueError, KeyError):
-                continue
+        # data = json.loads(raw_text)
+        # reviewed: list[DiagnosisIssue] = []
+        # for item in data.get("reviewed_issues", []):
+        #     try:
+        #         reviewed.append(
+        #             DiagnosisIssue(
+        #                 type=IssueType(item["type"]),
+        #                 severity=IssueSeverity(item.get("severity", "warning")),
+        #                 source=IssueSource.structural,
+        #                 page=item.get("page"),
+        #                 location=item.get("location"),
+        #                 description=item.get("description", ""),
+        #                 suggested_fix=item.get("suggested_fix"),
+        #                 confidence=max(0.0, min(1.0, float(item.get("confidence", 0.7)))),
+        #             )
+        #         )
+        #     except ValueError, KeyError:
+        #         continue
 
-        return reviewed if reviewed else issues
+        return reviewed_findings.reviewed_issues or issues
 
     except Exception:
-        logger.exception(
-            f"Job {job_id}: Claude structural review failed, "
-            "keeping original findings"
-        )
+        logger.exception(f"Job {job_id}: Claude structural review failed, keeping original findings")
         return issues
+
+
+async def _call_gemini(prompt: str, system_prompt: str, effort_config: EffortConfig) -> str:
+    """Call Gemini for fix planning with retry + timeout."""
+
+    model = effort_config.orchestration_model or "gemini-3-flash-preview"
+
+    async def _do_call() -> str:
+        resp = await ai_client.aio.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=GenerateContentConfig(
+                response_mime_type="application/json",
+                response_json_schema=StructuralFindings.model_json_schema(),
+                temperature=1.0,  # Recommended for Gemini 3
+                top_p=0.9,
+                thinking_config=ThinkingConfig(thinking_level=ThinkingLevel.HIGH),
+                system_instruction=system_prompt,
+            ),
+        )
+        return resp.text or ""
+
+    return await with_retry(
+        _do_call,
+        max_retries=settings.AI_API_MAX_RETRIES,
+        retryable=(TimeoutError, asyncio.TimeoutError, ConnectionError, OSError),
+        label="gemini-structural-review",
+    )
 
 
 def _compute_file_hash(job_id: str) -> str:
@@ -430,7 +467,8 @@ async def _store_diagnosis(
         await f.write(diagnosis.model_dump_json(indent=2))
 
     await JobStateManager.set_state(
-        job_id, "diagnosed",
+        job_id,
+        "diagnosed",
         extra={
             "issues_found": str(diagnosis.summary.total_issues),
             "print_readiness": diagnosis.summary.print_readiness,

@@ -16,10 +16,10 @@ _WP_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 async def set_margins(
     file_path: str,
     job_id: str,
-    top: float = 1.0,
-    bottom: float = 1.0,
+    top: float = 0.5,
+    bottom: float = 0.5,
     left: float = 1.0,
-    right: float = 1.0,
+    right: float = 0.75,
 ) -> FixResult:
     """Set margins on all sections of a DOCX. Values in inches."""
     return await asyncio.to_thread(

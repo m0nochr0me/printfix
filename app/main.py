@@ -67,9 +67,7 @@ async def lifespan(app: FastAPI):
     async with mcp_app.lifespan(app):
         logger.info(f"Starting up {settings.PROJECT_NAME} v{settings.PROJECT_VERSION}")
         logger.info(f"Debug mode: {settings.DEBUG}")
-        logger.info(
-            f"Listening on: {settings.APP_HOST}:{settings.APP_PORT} - Workers: {settings.APP_WORKERS}"
-        )
+        logger.info(f"Listening on: {settings.APP_HOST}:{settings.APP_PORT} - Workers: {settings.APP_WORKERS}")
         logger.info(f"Exec ID: {exec_id}")
 
         if not taskiq_broker.is_worker_process:
@@ -126,11 +124,7 @@ async def request_logging_middleware(request: Request, call_next):
     duration_ms = (perf_counter() - t0) * 1000
     # Skip noisy paths
     if request.url.path not in ("/favicon.ico", "/health"):
-        logger.info(
-            f"{request.method} {request.url.path} "
-            f"status={response.status_code} "
-            f"duration={duration_ms:.1f}ms"
-        )
+        logger.info(f"{request.method} {request.url.path} status={response.status_code} duration={duration_ms:.1f}ms")
     return response
 
 

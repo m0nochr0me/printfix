@@ -2,8 +2,6 @@
 Orchestration models — fix planning, execution, and convergence.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -12,11 +10,25 @@ from pydantic import BaseModel, Field
 class FixAction(BaseModel):
     """A single fix action to execute."""
 
-    tool_name: str
+    tool_name: str = Field(description="The name of the fix tool to use.")
     params: dict[str, Any] = Field(default_factory=dict)
     target_issues: list[str] = Field(default_factory=list)
-    reasoning: str = ""
-    is_fallback: bool = False  # True when this is a PDF fallback for an editable doc
+    reasoning: str = Field(default="", description="Explanation for the reasoning behind this fix action.")
+    is_fallback: bool = Field(default=False, description="True when this is a PDF fallback for an editable doc")
+
+
+class SkippedIssue(BaseModel):
+    """An issue that was skipped during planning."""
+
+    type: str = Field(description="The issue_type of the skipped issue.")
+    reason: str = Field(description="Explanation for why the issue was skipped.")
+
+
+class PlannerFindings(BaseModel):
+    """Structure of the fix plan response from the planner LLM."""
+
+    actions: list[FixAction] = Field(description="List of planned fix actions.")
+    skipped_issues: list[SkippedIssue] = Field(description="List of issues that were skipped during planning.")
 
 
 class FixPlan(BaseModel):

@@ -3,8 +3,6 @@ Verification engine: before/after comparison, confidence scoring,
 fix report generation, and final quality assessment.
 """
 
-from __future__ import annotations
-
 import asyncio
 import json
 import os
@@ -17,7 +15,7 @@ from google.genai.types import Content, GenerateContentConfig, Part, ThinkingCon
 from app.core.ai import ai_client
 from app.core.effort import EffortConfig, get_effort_config
 from app.core.log import logger
-from app.core.prompts import VERIFICATION_PROMPT
+from app.core.prompts import get_prompt
 from app.core.rendering import render_pages
 from app.core.storage import get_job_dir
 from app.schema.diagnosis import DocumentDiagnosis
@@ -29,6 +27,7 @@ from app.schema.verification import (
     FixReport,
     FixReportEntry,
     PageComparison,
+    VerificationFindings,
     VerificationResult,
 )
 from app.worker.job_state import JobStateManager
@@ -349,13 +348,18 @@ async def _ai_visual_check(
             parts.append(Part.from_bytes(data=image_bytes, mime_type="image/png"))
 
     # parts.append(Part.from_text(text=VERIFICATION_PROMPT))
+    system_prompt = get_prompt("verification").render(
+        before_images=len(before_pages),
+        after_images=len(after_pages),
+    )
 
     config = GenerateContentConfig(
+        response_mime_type="application/json",
+        response_json_schema=VerificationFindings.model_json_schema(),
+        thinking_config=ThinkingConfig(thinking_level=ThinkingLevel.HIGH),
         temperature=1.0,  # Recommended for Gemini 3
         top_p=0.9,
-        thinking_config=ThinkingConfig(thinking_level=ThinkingLevel.HIGH),
-        response_mime_type="application/json",
-        system_instruction=VERIFICATION_PROMPT,
+        system_instruction=system_prompt,
     )
 
     response = await ai_client.aio.models.generate_content(
@@ -365,9 +369,11 @@ async def _ai_visual_check(
     )
 
     try:
-        result = json.loads(response.text or "{}")
-        score = float(result.get("overall_score", 85.0))
-        return max(0.0, min(100.0, score))
+        verification_findings = VerificationFindings.model_validate_json(response.text)  # type: ignore
+        logger.info(
+            f"Job {job_id}: AI visual check score={verification_findings.overall_score} — {verification_findings.summary}"
+        )
+        return max(0.0, min(100.0, verification_findings.overall_score))
     except json.JSONDecodeError, ValueError, TypeError:
         logger.warning(f"Job {job_id}: could not parse AI visual score, defaulting to 85")
         return 85.0

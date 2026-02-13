@@ -1,15 +1,15 @@
 """Merge visual and structural diagnosis results into unified output."""
 
 import asyncio
-import json
 
+import yaml
 from google.genai.types import GenerateContentConfig, ThinkingConfig, ThinkingLevel
 
 from app.core.ai import ai_client
 from app.core.config import settings
 from app.core.effort import EffortConfig
 from app.core.log import logger
-from app.core.prompts import MERGE_DIAGNOSIS_PROMPT
+from app.core.prompts import get_prompt
 from app.core.retry import with_retry
 from app.schema.diagnosis import (
     DiagnosisIssue,
@@ -18,6 +18,7 @@ from app.schema.diagnosis import (
     IssueSeverity,
     IssueSource,
     IssueType,
+    MergedPageDiagnosis,
     PageDiagnosis,
 )
 
@@ -91,29 +92,57 @@ async def merge_diagnoses_ai(
 ) -> DocumentDiagnosis:
     """AI-assisted merge using Gemini (or Claude if enabled) for Thorough effort level."""
     # Serialize findings for the prompt
-    visual_json = json.dumps([p.model_dump() for p in visual_pages], indent=2)
-    structural_json = json.dumps([i.model_dump() for i in structural_issues], indent=2)
+    # visual_json = json.dumps([p.model_dump() for p in visual_pages], indent=2)
+    # structural_json = json.dumps([i.model_dump() for i in structural_issues], indent=2)
 
-    prompt = MERGE_DIAGNOSIS_PROMPT.format(
-        visual_findings=visual_json,
-        structural_findings=structural_json,
+    visual_findings = yaml.safe_dump(
+        [p.model_dump(mode="json") for p in visual_pages],
+        sort_keys=False,
+        indent=2,
+        width=1024,
+        allow_unicode=True,
+        default_flow_style=False,
+    )
+
+    structural_findings = yaml.safe_dump(
+        [i.model_dump(mode="json") for i in structural_issues],
+        sort_keys=False,
+        indent=2,
+        width=1024,
+        allow_unicode=True,
+        default_flow_style=False,
+    )
+
+    prompt = "Merge findings from visual inspection and structural review into a unified diagnosis of print quality issues.\n\n"
+
+    system_prompt = get_prompt("merge_diagnosis").render(
+        total_pages=page_count,
+        file_type=file_type,
+        visual_findings=visual_findings,
+        structural_findings=structural_findings,
     )
 
     try:
-        # Use Anthropic if explicitly enabled, otherwise use Gemini
-        if settings.USE_ANTHROPIC_AI:
-            raw_text = await _call_claude_merge(prompt, config, job_id)
-        else:
-            raw_text = await _call_gemini_merge(prompt, config, job_id)
-
-        data = json.loads(raw_text)
-        return _parse_ai_merge_response(
-            data,
-            job_id,
-            effort_level,
-            file_type,
-            page_count,
+        raw_text = await _call_gemini_merge(prompt, system_prompt, config, job_id)
+        findings = MergedPageDiagnosis.model_validate_json(raw_text)  # type: ignore
+        return DocumentDiagnosis(
+            job_id=job_id,
+            effort_level=effort_level,
+            file_type=file_type,
+            page_count=page_count,
+            pages=findings.pages,
+            document_issues=findings.document_issues,
+            summary=_compute_summary([i for p in findings.pages for i in p.issues] + findings.document_issues),
         )
+
+        # data = json.loads(raw_text)
+        # return _parse_ai_merge_response(
+        #     data,
+        #     job_id,
+        #     effort_level,
+        #     file_type,
+        #     page_count,
+        # )
     except Exception:
         logger.exception(f"Job {job_id}: AI merge failed, falling back to rule-based merge")
         return merge_diagnoses(
@@ -126,7 +155,12 @@ async def merge_diagnoses_ai(
         )
 
 
-async def _call_gemini_merge(prompt: str, config: EffortConfig, job_id: str) -> str:
+async def _call_gemini_merge(
+    prompt: str,
+    system_prompt: str,
+    config: EffortConfig,
+    job_id: str,
+) -> str:
     """Call Gemini for diagnosis merge."""
 
     model = config.visual_model or "gemini-3-flash-preview"
@@ -137,9 +171,11 @@ async def _call_gemini_merge(prompt: str, config: EffortConfig, job_id: str) -> 
             contents=prompt,
             config=GenerateContentConfig(
                 response_mime_type="application/json",
+                response_json_schema=MergedPageDiagnosis.model_json_schema(),
                 temperature=1.0,  # Recommended for Gemini 3
                 top_p=0.9,
                 thinking_config=ThinkingConfig(thinking_level=ThinkingLevel.HIGH),
+                system_instruction=system_prompt,
             ),
         )
         return resp.text or ""
@@ -149,37 +185,6 @@ async def _call_gemini_merge(prompt: str, config: EffortConfig, job_id: str) -> 
         max_retries=settings.AI_API_MAX_RETRIES,
         retryable=(TimeoutError, asyncio.TimeoutError, ConnectionError, OSError),
         label=f"gemini-merge({job_id})",
-    )
-
-
-async def _call_claude_merge(prompt: str, config: EffortConfig, job_id: str) -> str:
-    """Call Claude for diagnosis merge (only if explicitly enabled)."""
-    from app.core.ai import extract_anthropic_text, get_anthropic_client  # noqa: PLC0415
-    # from app.core.retry import with_retry
-
-    client = get_anthropic_client()
-    if not client:
-        raise RuntimeError("Anthropic client not configured but USE_ANTHROPIC_AI is True")
-
-    model = config.claude_model or settings.ANTHROPIC_DIAGNOSIS_MODEL
-
-    async def _do_call() -> str:
-        resp = await asyncio.wait_for(
-            asyncio.to_thread(
-                client.messages.create,
-                model=model,
-                max_tokens=4096,
-                messages=[{"role": "user", "content": prompt}],
-            ),
-            timeout=settings.AI_API_TIMEOUT_SECONDS,
-        )
-        return extract_anthropic_text(resp)
-
-    return await with_retry(
-        _do_call,
-        max_retries=settings.AI_API_MAX_RETRIES,
-        retryable=(TimeoutError, asyncio.TimeoutError, ConnectionError, OSError),
-        label=f"claude-merge({job_id})",
     )
 
 

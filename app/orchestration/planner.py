@@ -5,25 +5,24 @@ Given a DocumentDiagnosis, produces a FixPlan: an ordered list of
 FixActions to apply in a single iteration.
 """
 
-from __future__ import annotations
-
 import asyncio
 import json
 
+import yaml
 from google.genai.types import GenerateContentConfig, ThinkingConfig, ThinkingLevel
 
 from app.core.ai import ai_client, extract_anthropic_text, get_anthropic_client
 from app.core.config import settings
 from app.core.effort import EffortConfig
 from app.core.log import logger
-from app.core.prompts import FIX_PLANNING_PROMPT
+from app.core.prompts import get_prompt
 from app.core.retry import with_retry
 from app.schema.diagnosis import (
     DiagnosisIssue,
     DocumentDiagnosis,
     IssueSeverity,
 )
-from app.schema.orchestration import FixAction, FixPlan
+from app.schema.orchestration import FixAction, FixPlan, PlannerFindings
 
 __all__ = ("plan_fixes",)
 
@@ -501,29 +500,42 @@ async def plan_fixes_ai(
     fallback_context = ""
     if failed_issue_types and _is_editable_format(file_type):
         fallback_context = (
-            f"\n\n**Fallback context:** The following issue types failed to resolve "
+            f"The following issue types failed to resolve "
             f"with {file_type.upper()} tools in previous iterations: "
             f"{', '.join(sorted(failed_issue_types))}. "
             f"You SHOULD use PDF fallback tools for these issues instead. "
             f"Mark these actions with is_fallback=true."
         )
 
-    diagnosis_json = diagnosis.model_dump_json(indent=2)
-    prompt = (
-        FIX_PLANNING_PROMPT.format(
-            file_type=file_type,
-            target_page_size=target_page_size or "original",
-            aggressiveness=aggressiveness,
-            diagnosis_json=diagnosis_json,
-        )
-        + fallback_context
+    diagnosis_data = yaml.safe_dump(
+        diagnosis.model_dump(mode="json"),
+        sort_keys=False,
+        indent=2,
+        width=1024,
+        allow_unicode=True,
+        default_flow_style=False,
+    )
+    system_prompt = get_prompt("fix_planning").render(
+        file_type=file_type,
+        target_page_size=target_page_size or "original",
+        aggressiveness=aggressiveness,
     )
 
+    prompt = f"Plan fixes for the following document diagnosis:\n\n{diagnosis_data}\n\n{fallback_context}"
+
     try:
-        raw_text = await _call_planning_model(prompt, effort_config)
-        return _parse_ai_plan(raw_text, diagnosis.job_id, iteration)
-    except Exception:
-        logger.exception(f"Job {diagnosis.job_id}: AI fix planning failed, falling back to rule-based")
+        # raw_text = await _call_planning_model(prompt, effort_config)
+        raw_text = await _call_gemini(prompt, system_prompt, effort_config)
+        findings = PlannerFindings.model_validate_json(raw_text)
+        return FixPlan(
+            job_id=diagnosis.job_id,
+            iteration=iteration,
+            actions=findings.actions,
+            skipped_issues=[f"{item.type}: {item.reason}" for item in findings.skipped_issues],
+        )
+        # return _parse_ai_plan(raw_text, diagnosis.job_id, iteration)
+    except Exception as e:
+        logger.exception(f"Job {diagnosis.job_id}: AI fix planning failed, falling back to rule-based: {e}")
         return plan_fixes_rule_based(
             diagnosis,
             aggressiveness,
@@ -534,17 +546,17 @@ async def plan_fixes_ai(
         )
 
 
-async def _call_planning_model(prompt: str, effort_config: EffortConfig) -> str:
-    """Call the appropriate AI model for fix planning."""
-    # Use Claude only if explicitly enabled in settings
-    if settings.USE_ANTHROPIC_AI and effort_config.use_ai_planning and effort_config.orchestration_model is None:
-        return await _call_claude(prompt, effort_config)
+# async def _call_planning_model(prompt: str, effort_config: EffortConfig) -> str:
+#     """Call the appropriate AI model for fix planning."""
+#     # Use Claude only if explicitly enabled in settings
+#     if settings.USE_ANTHROPIC_AI and effort_config.use_ai_planning and effort_config.orchestration_model is None:
+#         return await _call_claude(prompt, effort_config)
 
-    # Default to Gemini
-    return await _call_gemini(prompt, effort_config)
+#     # Default to Gemini
+#     return await _call_gemini(prompt, effort_config)
 
 
-async def _call_gemini(prompt: str, effort_config: EffortConfig) -> str:
+async def _call_gemini(prompt: str, system_prompt: str, effort_config: EffortConfig) -> str:
     """Call Gemini for fix planning with retry + timeout."""
 
     model = effort_config.orchestration_model or "gemini-3-flash-preview"
@@ -555,9 +567,11 @@ async def _call_gemini(prompt: str, effort_config: EffortConfig) -> str:
             contents=prompt,
             config=GenerateContentConfig(
                 response_mime_type="application/json",
+                response_json_schema=PlannerFindings.model_json_schema(),
                 temperature=1.0,  # Recommended for Gemini 3
                 top_p=0.9,
                 thinking_config=ThinkingConfig(thinking_level=ThinkingLevel.HIGH),
+                system_instruction=system_prompt,
             ),
         )
         return resp.text or ""
@@ -607,36 +621,36 @@ async def _call_claude(prompt: str, effort_config: EffortConfig) -> str:
     )
 
 
-def _parse_ai_plan(raw_text: str, job_id: str, iteration: int) -> FixPlan:
-    """Parse structured JSON from AI response into a FixPlan."""
-    data = json.loads(raw_text)
+# def _parse_ai_plan(raw_text: str, job_id: str, iteration: int) -> FixPlan:
+#     """Parse structured JSON from AI response into a FixPlan."""
+#     data = json.loads(raw_text)
 
-    pdf_tools = {"pdf_crop_margins", "pdf_scale_content", "pdf_rotate_pages"}
-    actions: list[FixAction] = []
-    for item in data.get("actions", []):
-        tool = item["tool_name"]
-        actions.append(
-            FixAction(
-                tool_name=tool,
-                params=item.get("params", {}),
-                target_issues=item.get("target_issues", []),
-                reasoning=item.get("reasoning", ""),
-                is_fallback=item.get("is_fallback", tool in pdf_tools),
-            )
-        )
+#     pdf_tools = {"pdf_crop_margins", "pdf_scale_content", "pdf_rotate_pages"}
+#     actions: list[FixAction] = []
+#     for item in data.get("actions", []):
+#         tool = item["tool_name"]
+#         actions.append(
+#             FixAction(
+#                 tool_name=tool,
+#                 params=item.get("params", {}),
+#                 target_issues=item.get("target_issues", []),
+#                 reasoning=item.get("reasoning", ""),
+#                 is_fallback=item.get("is_fallback", tool in pdf_tools),
+#             )
+#         )
 
-    skipped: list[str] = []
-    for item in data.get("skipped_issues", []):
-        reason = item.get("reason", "")
-        issue_type = item.get("type", "unknown")
-        skipped.append(f"{issue_type}: {reason}")
+#     skipped: list[str] = []
+#     for item in data.get("skipped_issues", []):
+#         reason = item.get("reason", "")
+#         issue_type = item.get("type", "unknown")
+#         skipped.append(f"{issue_type}: {reason}")
 
-    return FixPlan(
-        job_id=job_id,
-        iteration=iteration,
-        actions=actions,
-        skipped_issues=skipped,
-    )
+#     return FixPlan(
+#         job_id=job_id,
+#         iteration=iteration,
+#         actions=actions,
+#         skipped_issues=skipped,
+#     )
 
 
 async def plan_fixes(

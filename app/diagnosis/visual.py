@@ -1,7 +1,6 @@
 """Visual page inspection using Gemini multimodal models."""
 
 import asyncio
-import json
 from pathlib import Path
 
 from google.genai.types import (
@@ -16,14 +15,11 @@ from app.core.ai import ai_client
 from app.core.config import settings
 from app.core.effort import EffortConfig
 from app.core.log import logger
-from app.core.prompts import VISUAL_INSPECTION_PROMPT
+from app.core.prompts import get_prompt
 from app.core.retry import with_retry
 from app.schema.diagnosis import (
-    DiagnosisIssue,
-    IssueSeverity,
-    IssueSource,
-    IssueType,
     PageDiagnosis,
+    PageDiagnosisFindings,
 )
 
 __all__ = ("inspect_pages_visually",)
@@ -110,7 +106,7 @@ async def _inspect_batch(
     page_numbers = [p[0] for p in page_batch]
     page_range = ", ".join(str(n) for n in page_numbers)
 
-    system_prompt = VISUAL_INSPECTION_PROMPT.format(
+    system_prompt = get_prompt("visual_inspection").render(
         page_range=page_range,
         file_type=file_type,
         total_pages=total_pages,
@@ -129,6 +125,7 @@ async def _inspect_batch(
             contents=Content(parts=parts),
             config=GenerateContentConfig(
                 response_mime_type="application/json",
+                response_json_schema=PageDiagnosisFindings.model_json_schema(),
                 temperature=1.0,  # Recommended for Gemini 3
                 top_p=0.9,
                 thinking_config=ThinkingConfig(thinking_level=ThinkingLevel.HIGH),
@@ -143,78 +140,5 @@ async def _inspect_batch(
         retryable=(TimeoutError, asyncio.TimeoutError, ConnectionError, OSError),
         label=f"gemini-visual({page_range})",
     )
-    return _parse_visual_response(raw_text, page_numbers)
-
-
-def _parse_visual_response(
-    raw_json: str,
-    page_numbers: list[int],
-) -> list[PageDiagnosis]:
-    """Parse and validate Gemini's JSON response into PageDiagnosis objects."""
-    try:
-        data = json.loads(raw_json)
-    except json.JSONDecodeError:
-        logger.warning(f"Failed to parse Gemini JSON response: {raw_json[:200]}")
-        return [PageDiagnosis(page=n) for n in page_numbers]
-
-    pages_data = data.get("pages", [])
-    result: list[PageDiagnosis] = []
-    seen_pages: set[int] = set()
-
-    for page_entry in pages_data:
-        page_num = page_entry.get("page")
-        if page_num not in page_numbers:
-            continue
-        seen_pages.add(page_num)
-
-        issues: list[DiagnosisIssue] = []
-        for issue_data in page_entry.get("issues", []):
-            issue = _parse_issue(issue_data, page_num)
-            if issue:
-                issues.append(issue)
-
-        result = [*result, PageDiagnosis(page=page_num, issues=issues)]
-
-    # Add empty diagnoses for pages not in response
-    for pn in page_numbers:
-        if pn not in seen_pages:
-            result = [*result, PageDiagnosis(page=pn)]
-
-    result.sort(key=lambda p: p.page)
-    return result
-
-
-def _parse_issue(issue_data: dict, page_num: int) -> DiagnosisIssue | None:
-    """Parse a single issue from the Gemini response, with validation."""
-    try:
-        issue_type_raw = issue_data.get("type", "")
-        try:
-            issue_type = IssueType(issue_type_raw)
-        except ValueError:
-            logger.debug(f"Unknown issue type from Gemini: {issue_type_raw}")
-            return None
-
-        severity_raw = issue_data.get("severity", "warning")
-        try:
-            severity = IssueSeverity(severity_raw)
-        except ValueError:
-            severity = IssueSeverity.warning
-
-        confidence = issue_data.get("confidence", 0.7)
-        if not isinstance(confidence, (int, float)):
-            confidence = 0.7
-        confidence = max(0.0, min(1.0, float(confidence)))
-
-        return DiagnosisIssue(
-            type=issue_type,
-            severity=severity,
-            source=IssueSource.visual,
-            page=page_num,
-            location=issue_data.get("location"),
-            description=issue_data.get("description", "Visual issue detected"),
-            suggested_fix=issue_data.get("suggested_fix"),
-            confidence=confidence,
-        )
-    except Exception:
-        logger.debug(f"Failed to parse issue: {issue_data}")
-        return None
+    findings = PageDiagnosisFindings.model_validate_json(raw_text)  # type: ignore
+    return findings.pages

@@ -120,7 +120,7 @@ class JobStateManager:
         r = await cls.get_redis()
         jobs: list[dict] = []
         async for key in r.scan_iter(match="printfix:job:*", count=200):
-            data = await r.hgetall(key)
+            data = await r.hgetall(key) # type: ignore
             if data:
                 jobs.append(dict(data))
         jobs.sort(key=lambda j: j.get("created_at", ""), reverse=True)

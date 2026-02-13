@@ -7,13 +7,15 @@ import json
 from pathlib import Path
 from random import random
 
+import aiofiles
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 from ulid import ULID
 
 from app.api.deps import check_rate_limit, verify_token
 from app.core.config import settings
-from app.core.storage import delete_job_files, save_upload
+from app.core.storage import delete_job_files, get_job_dir, save_upload
+from app.fixes.common import get_fix_log
 from app.schema.diagnosis import DiagnosisResponse
 from app.schema.fix import FixLog
 from app.schema.job import (
@@ -77,7 +79,7 @@ async def list_jobs() -> list[JobResponse]:
                     error=j.get("error"),
                 )
             )
-        except KeyError, ValueError:
+        except (KeyError, ValueError):
             continue
     return results
 
@@ -259,7 +261,6 @@ async def get_diagnosis(job_id: str) -> DiagnosisResponse:
             detail="Diagnosis results not found on disk",
         )
 
-    import aiofiles
 
     async with aiofiles.open(diagnosis_path, "r") as f:
         diagnosis_data = json.loads(await f.read())
@@ -296,7 +297,6 @@ async def get_fixes(job_id: str) -> FixLog:
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    from app.fixes.common import get_fix_log
 
     return await get_fix_log(job_id)
 
@@ -344,9 +344,8 @@ async def get_orchestration(job_id: str) -> OrchestrationResponse:
 
     orchestration_path = job.get("orchestration_path")
     if orchestration_path and Path(orchestration_path).exists():
-        import aiofiles as _aiofiles
 
-        async with _aiofiles.open(orchestration_path, "r") as f:
+        async with aiofiles.open(orchestration_path, "r") as f:
             result_data = json.loads(await f.read())
         return OrchestrationResponse(
             job_id=job_id,
@@ -433,7 +432,6 @@ async def download_job(
             detail=f"Cannot download from status: {job['status']}. Job must be in 'done' or 'needs_review' state.",
         )
 
-    from app.core.storage import get_job_dir
 
     job_dir = get_job_dir(job_id)
     original_filename = job.get("original_filename", "document")
@@ -481,9 +479,7 @@ async def get_verification(job_id: str) -> dict:
             detail="Verification results not available yet",
         )
 
-    import aiofiles as _aiofiles
-
-    async with _aiofiles.open(verification_path, "r") as f:
+    async with aiofiles.open(verification_path, "r") as f:
         verification_data = json.loads(await f.read())
 
     return {
@@ -507,9 +503,7 @@ async def get_report(job_id: str) -> dict:
             detail="Fix report not available yet",
         )
 
-    import aiofiles as _aiofiles
-
-    async with _aiofiles.open(verification_path, "r") as f:
+    async with aiofiles.open(verification_path, "r") as f:
         verification_data = json.loads(await f.read())
 
     report = verification_data.get("report")
@@ -536,9 +530,7 @@ async def get_preview_comparison(job_id: str) -> dict:
             detail="Comparison data not available yet",
         )
 
-    import aiofiles as _aiofiles
-
-    async with _aiofiles.open(verification_path, "r") as f:
+    async with aiofiles.open(verification_path, "r") as f:
         verification_data = json.loads(await f.read())
 
     comparisons = verification_data.get("page_comparisons", [])
@@ -555,8 +547,6 @@ async def get_preview_before(job_id: str, page: int) -> FileResponse:
     job = await JobStateManager.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-
-    from app.core.storage import get_job_dir
 
     before_dir = get_job_dir(job_id) / "pages_before"
     if not before_dir.exists():
@@ -575,8 +565,6 @@ async def get_preview_after(job_id: str, page: int) -> FileResponse:
     job = await JobStateManager.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-
-    from app.core.storage import get_job_dir
 
     after_dir = get_job_dir(job_id) / "pages_after"
     if not after_dir.exists():

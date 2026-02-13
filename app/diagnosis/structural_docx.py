@@ -1,12 +1,10 @@
 """Structural analysis for DOCX files using python-docx."""
 
-from __future__ import annotations
-
 import asyncio
 import re
 import zipfile
-from pathlib import Path
-from xml.etree import ElementTree
+
+from docx import Document
 
 from app.core.config import settings
 from app.core.log import logger
@@ -25,11 +23,25 @@ _HALF_PT_PER_PT = 2
 
 # Fonts commonly available on most print systems
 _SAFE_FONTS = {
-    "Arial", "Calibri", "Cambria", "Courier New", "Georgia",
-    "Helvetica", "Tahoma", "Times New Roman", "Verdana",
-    "Consolas", "Segoe UI", "Trebuchet MS", "Palatino Linotype",
-    "Book Antiqua", "Garamond", "Century Gothic", "Lucida Sans",
-    "Symbol", "Wingdings",
+    "Arial",
+    "Calibri",
+    "Cambria",
+    "Courier New",
+    "Georgia",
+    "Helvetica",
+    "Tahoma",
+    "Times New Roman",
+    "Verdana",
+    "Consolas",
+    "Segoe UI",
+    "Trebuchet MS",
+    "Palatino Linotype",
+    "Book Antiqua",
+    "Garamond",
+    "Century Gothic",
+    "Lucida Sans",
+    "Symbol",
+    "Wingdings",
 }
 
 
@@ -40,8 +52,6 @@ async def analyze_docx(file_path: str, job_id: str) -> list[DiagnosisIssue]:
 
 
 def _analyze_docx_sync(file_path: str, job_id: str) -> list[DiagnosisIssue]:
-    from docx import Document
-    from docx.shared import Emu
 
     issues: list[DiagnosisIssue] = []
     try:
@@ -77,37 +87,37 @@ def _check_margins(doc) -> list[DiagnosisIssue]:
         for side, value in margins.items():
             if 0 < value < min_margin_emu:
                 inches = value / _EMU_PER_INCH
-                issues.append(DiagnosisIssue(
-                    type=IssueType.margin_violation,
-                    severity=IssueSeverity.warning,
-                    source=IssueSource.structural,
-                    description=(
-                        f"Section {i}: {side} margin is {inches:.2f}\" "
-                        f"(minimum {settings.DIAGNOSIS_MIN_MARGIN_INCHES}\" recommended)"
-                    ),
-                    suggested_fix="set_margins",
-                    confidence=0.9,
-                ))
+                issues.append(
+                    DiagnosisIssue(
+                        type=IssueType.margin_violation,
+                        severity=IssueSeverity.warning,
+                        source=IssueSource.structural,
+                        description=(
+                            f'Section {i}: {side} margin is {inches:.2f}" '
+                            f'(minimum {settings.DIAGNOSIS_MIN_MARGIN_INCHES}" recommended)'
+                        ),
+                        suggested_fix="set_margins",
+                        confidence=0.9,
+                    )
+                )
 
     # Check for inconsistent margins across sections
     if len(margin_sets) > 1:
         first_margins = margin_sets[0][1]
-        inconsistent = [
-            sec_num for sec_num, margins in margin_sets[1:]
-            if margins != first_margins
-        ]
+        inconsistent = [sec_num for sec_num, margins in margin_sets[1:] if margins != first_margins]
         if inconsistent:
-            issues.append(DiagnosisIssue(
-                type=IssueType.inconsistent_margins,
-                severity=IssueSeverity.info,
-                source=IssueSource.structural,
-                description=(
-                    f"Margins differ across sections: sections {inconsistent} "
-                    f"have different margins than section 1"
-                ),
-                suggested_fix="set_margins",
-                confidence=0.85,
-            ))
+            issues.append(
+                DiagnosisIssue(
+                    type=IssueType.inconsistent_margins,
+                    severity=IssueSeverity.warning,
+                    source=IssueSource.structural,
+                    description=(
+                        f"Margins differ across sections: sections {inconsistent} have different margins than section 1"
+                    ),
+                    suggested_fix="set_margins",
+                    confidence=0.85,
+                )
+            )
 
     return issues
 
@@ -128,9 +138,7 @@ def _check_fonts(doc) -> list[DiagnosisIssue]:
             if run.font.size is not None:
                 pt = run.font.size / 12700  # EMU to pt
                 if pt < min_pt and run.text.strip():
-                    small_font_locations.append(
-                        f"paragraph {i} ({pt:.1f}pt)"
-                    )
+                    small_font_locations.append(f"paragraph {i} ({pt:.1f}pt)")
 
     # Check table cells
     for t_idx, table in enumerate(doc.tables, 1):
@@ -143,37 +151,40 @@ def _check_fonts(doc) -> list[DiagnosisIssue]:
                         if run.font.size is not None:
                             pt = run.font.size / 12700
                             if pt < min_pt and run.text.strip():
-                                small_font_locations.append(
-                                    f"table {t_idx} ({pt:.1f}pt)"
-                                )
+                                small_font_locations.append(f"table {t_idx} ({pt:.1f}pt)")
 
     # Flag uncommon fonts
     uncommon = fonts_used - _SAFE_FONTS
     for font in uncommon:
-        issues.append(DiagnosisIssue(
-            type=IssueType.non_embedded_font,
-            severity=IssueSeverity.warning,
-            source=IssueSource.structural,
-            description=f"Font '{font}' may not be available on print server",
-            suggested_fix="replace_font",
-            confidence=0.6,
-        ))
+        issues = [
+            *issues,
+            DiagnosisIssue(
+                type=IssueType.non_embedded_font,
+                severity=IssueSeverity.warning,
+                source=IssueSource.structural,
+                description=f"Font '{font}' may not be available on print server",
+                suggested_fix="replace_font",
+                confidence=0.6,
+            ),
+        ]
 
     # Flag small fonts (aggregate)
     if small_font_locations:
         sample = small_font_locations[:5]
-        issues.append(DiagnosisIssue(
-            type=IssueType.small_font,
-            severity=IssueSeverity.warning,
-            source=IssueSource.structural,
-            description=(
-                f"Small font sizes detected (< {min_pt}pt) in: "
-                + ", ".join(sample)
-                + (f" and {len(small_font_locations) - 5} more" if len(small_font_locations) > 5 else "")
-            ),
-            suggested_fix="adjust_font_size",
-            confidence=0.85,
-        ))
+        issues.append(
+            DiagnosisIssue(
+                type=IssueType.small_font,
+                severity=IssueSeverity.warning,
+                source=IssueSource.structural,
+                description=(
+                    f"Small font sizes detected (< {min_pt}pt) in: "
+                    + ", ".join(sample)
+                    + (f" and {len(small_font_locations) - 5} more" if len(small_font_locations) > 5 else "")
+                ),
+                suggested_fix="adjust_font_size",
+                confidence=0.85,
+            )
+        )
 
     return issues
 
@@ -207,17 +218,16 @@ def _check_tables(doc) -> list[DiagnosisIssue]:
 
         if max_row_width > printable_width:
             overflow_pct = ((max_row_width - printable_width) / printable_width) * 100
-            issues.append(DiagnosisIssue(
-                type=IssueType.table_overflow,
-                severity=IssueSeverity.critical,
-                source=IssueSource.structural,
-                description=(
-                    f"Table {t_idx} width exceeds printable area "
-                    f"by {overflow_pct:.0f}%"
-                ),
-                suggested_fix="auto_fit_tables",
-                confidence=0.9,
-            ))
+            issues.append(
+                DiagnosisIssue(
+                    type=IssueType.table_overflow,
+                    severity=IssueSeverity.critical,
+                    source=IssueSource.structural,
+                    description=(f"Table {t_idx} width exceeds printable area by {overflow_pct:.0f}%"),
+                    suggested_fix="auto_fit_tables",
+                    confidence=0.9,
+                )
+            )
 
     return issues
 
@@ -277,19 +287,21 @@ def _check_images(doc) -> list[DiagnosisIssue]:
                                 severity = IssueSeverity.info
                                 severity_note = "minor overflow"
 
-                            issues.append(DiagnosisIssue(
-                                type=IssueType.image_overflow,
-                                severity=severity,
-                                source=IssueSource.structural,
-                                location=f"paragraph {para_num}",
-                                description=(
-                                    f"Image width {img_width_inches:.2f}\" exceeds printable area "
-                                    f"{printable_width_inches:.2f}\" by {overflow_pct:.0f}% "
-                                    f"({severity_note})"
-                                ),
-                                suggested_fix="resize_image_to_fit",
-                                confidence=0.9,
-                            ))
+                            issues.append(
+                                DiagnosisIssue(
+                                    type=IssueType.image_overflow,
+                                    severity=severity,
+                                    source=IssueSource.structural,
+                                    location=f"paragraph {para_num}",
+                                    description=(
+                                        f'Image width {img_width_inches:.2f}" exceeds printable area '
+                                        f'{printable_width_inches:.2f}" by {overflow_pct:.0f}% '
+                                        f"({severity_note})"
+                                    ),
+                                    suggested_fix="resize_image_to_fit",
+                                    confidence=0.9,
+                                )
+                            )
 
     return issues
 
@@ -326,15 +338,17 @@ def _check_page_breaks(doc) -> list[DiagnosisIssue]:
         prev_was_break = has_break
 
         if consecutive_breaks >= 2:
-            issues.append(DiagnosisIssue(
-                type=IssueType.blank_page,
-                severity=IssueSeverity.warning,
-                source=IssueSource.structural,
-                location=f"near paragraph {i}",
-                description="Consecutive page breaks create blank page(s)",
-                suggested_fix="remove_blank_pages",
-                confidence=0.8,
-            ))
+            issues.append(
+                DiagnosisIssue(
+                    type=IssueType.blank_page,
+                    severity=IssueSeverity.warning,
+                    source=IssueSource.structural,
+                    location=f"near paragraph {i}",
+                    description="Consecutive page breaks create blank page(s)",
+                    suggested_fix="remove_blank_pages",
+                    confidence=0.8,
+                )
+            )
             consecutive_breaks = 0  # don't double-report
 
     return issues
@@ -347,24 +361,22 @@ def _check_hidden_content(doc) -> list[DiagnosisIssue]:
 
     for para in doc.paragraphs:
         for run in para.runs:
-            rpr = run._element.find(
-                "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr"
-            )
+            rpr = run._element.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr")
             if rpr is not None:
-                vanish = rpr.find(
-                    "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}vanish"
-                )
+                vanish = rpr.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}vanish")
                 if vanish is not None and run.text.strip():
                     hidden_count += 1
 
     if hidden_count:
-        issues.append(DiagnosisIssue(
-            type=IssueType.hidden_content,
-            severity=IssueSeverity.info,
-            source=IssueSource.structural,
-            description=f"{hidden_count} hidden text run(s) found in document",
-            confidence=0.95,
-        ))
+        issues.append(
+            DiagnosisIssue(
+                type=IssueType.hidden_content,
+                severity=IssueSeverity.info,
+                source=IssueSource.structural,
+                description=f"{hidden_count} hidden text run(s) found in document",
+                confidence=0.95,
+            )
+        )
 
     return issues
 
@@ -379,21 +391,23 @@ def _check_tracked_changes(file_path: str) -> list[DiagnosisIssue]:
                 return issues
             xml_content = z.read("word/document.xml").decode("utf-8")
 
-        ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-        insertions = len(re.findall(f"<w:ins\\b", xml_content))
-        deletions = len(re.findall(f"<w:del\\b", xml_content))
+        # ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+        insertions = len(re.findall("<w:ins\\b", xml_content))
+        deletions = len(re.findall("<w:del\\b", xml_content))
 
         if insertions or deletions:
-            issues.append(DiagnosisIssue(
-                type=IssueType.tracked_changes,
-                severity=IssueSeverity.warning,
-                source=IssueSource.structural,
-                description=(
-                    f"Document contains unresolved tracked changes: "
-                    f"{insertions} insertion(s), {deletions} deletion(s)"
-                ),
-                confidence=0.95,
-            ))
+            issues.append(
+                DiagnosisIssue(
+                    type=IssueType.tracked_changes,
+                    severity=IssueSeverity.warning,
+                    source=IssueSource.structural,
+                    description=(
+                        f"Document contains unresolved tracked changes: "
+                        f"{insertions} insertion(s), {deletions} deletion(s)"
+                    ),
+                    confidence=0.95,
+                )
+            )
     except Exception:
         logger.debug(f"Failed to check tracked changes in {file_path}")
 

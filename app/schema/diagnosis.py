@@ -57,11 +57,26 @@ class DiagnosisIssue(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0, default=0.8)
 
 
+class StructuralFindings(BaseModel):
+    reviewed_issues: list[DiagnosisIssue] = Field(description="List of structurally reviewed issues.")
+    additional_notes: str = Field(default="", description="Any cross-cutting observations.")
+
+
 class PageDiagnosis(BaseModel):
     """Diagnosis results for a single page."""
 
     page: int
     issues: list[DiagnosisIssue] = Field(default_factory=list)
+
+
+class MergedPageDiagnosis(BaseModel):
+    pages: list[PageDiagnosis] = Field(description="List of merged page diagnoses.")
+    document_issues: list[DiagnosisIssue] = Field(description="List of document-level issues.")
+
+
+
+class PageDiagnosisFindings(BaseModel):
+    pages: list[PageDiagnosis] = Field(description="List of page diagnoses.")
 
 
 class DiagnosisSummary(BaseModel):
@@ -71,7 +86,7 @@ class DiagnosisSummary(BaseModel):
     critical_count: int = 0
     warning_count: int = 0
     info_count: int = 0
-    top_issues: list[str] = Field(default_factory=list)
+    top_issues: list[str] = Field(default_factory=list, description="List of top issues.")
     print_readiness: str = "unknown"
 
 
@@ -80,7 +95,7 @@ class DocumentDiagnosis(BaseModel):
 
     job_id: str
     effort_level: str
-    file_type: str
+    file_type: str = Field(description="Type of the file, e.g., PDF, DOCX")
     page_count: int
     pages: list[PageDiagnosis] = Field(default_factory=list)
     document_issues: list[DiagnosisIssue] = Field(default_factory=list)
