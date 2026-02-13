@@ -15,6 +15,9 @@ from app.fixes.page_breaks import (
     remove_manual_breaks as _remove_manual_breaks,
 )
 from app.fixes.page_layout import (
+    adjust_paragraph_indents as _adjust_paragraph_indents,
+)
+from app.fixes.page_layout import (
     remove_blank_pages as _remove_blank_pages,
 )
 from app.fixes.page_layout import (
@@ -131,6 +134,33 @@ async def remove_blank_pages(job_id: str) -> str:
     """Remove consecutive page breaks that create blank pages."""
     file_path, _ = await resolve_document(job_id)
     result = await _remove_blank_pages(file_path, job_id)
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+@server.tool()
+async def adjust_paragraph_indents(
+    job_id: str,
+    max_left_inches: float = 0.5,
+    max_right_inches: float = 0.5,
+    max_first_line_inches: float = 0.5,
+    strategy: str = "cap",
+) -> str:
+    """Adjust paragraph indents in a DOCX to reclaim printable space.
+
+    Reduces excessive left/right/first-line indents that waste page area,
+    especially after margins have been tightened.
+    Strategy: 'cap' (clamp at max) or 'scale' (proportionally shrink).
+    Values in inches.
+    """
+    file_path, _ = await resolve_document(job_id)
+    result = await _adjust_paragraph_indents(
+        file_path, job_id,
+        max_left_inches, max_right_inches, max_first_line_inches,
+        strategy,
+    )
     if result.success:
         await re_render_job(job_id)
     await record_fix(job_id, result)

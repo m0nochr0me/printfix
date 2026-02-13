@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     DIAGNOSIS_MIN_MARGIN_INCHES: float = 0.5
     DIAGNOSIS_MIN_FONT_PT: float = 8.0
     DIAGNOSIS_MIN_IMAGE_DPI: int = 150
+    DIAGNOSIS_MAX_INDENT_INCHES: float = 1.0
 
     # Timeouts & retries
     AI_API_TIMEOUT_SECONDS: int = 60

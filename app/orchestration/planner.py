@@ -53,6 +53,12 @@ _DOCX_ISSUE_MAP: dict[str, list[FixAction]] = {
             reasoning="Reduce margins to give content more room",
         ),
         FixAction(
+            tool_name="adjust_paragraph_indents",
+            params={"max_left_inches": 0.5, "max_right_inches": 0.5, "max_first_line_inches": 0.5},
+            target_issues=["clipped_content"],
+            reasoning="Cap indents that undermine margin reduction",
+        ),
+        FixAction(
             tool_name="auto_fit_tables",
             params={},
             target_issues=["clipped_content"],
@@ -65,6 +71,12 @@ _DOCX_ISSUE_MAP: dict[str, list[FixAction]] = {
             params={},
             target_issues=["text_overflow"],
             reasoning="Auto-fit tables to prevent text overflow",
+        ),
+        FixAction(
+            tool_name="adjust_paragraph_indents",
+            params={"max_left_inches": 0.5, "max_right_inches": 0.5, "max_first_line_inches": 0.5},
+            target_issues=["text_overflow"],
+            reasoning="Reduce indents that may push text beyond printable area",
         ),
     ],
     "table_overflow": [
@@ -137,6 +149,14 @@ _DOCX_ISSUE_MAP: dict[str, list[FixAction]] = {
             reasoning="Proportionally resize images that exceed printable area",
         ),
     ],
+    "inconsistent_indent": [
+        FixAction(
+            tool_name="adjust_paragraph_indents",
+            params={"max_left_inches": 0.5, "max_right_inches": 0.5, "max_first_line_inches": 0.5},
+            target_issues=["inconsistent_indent"],
+            reasoning="Cap excessive paragraph indents to reclaim printable space",
+        ),
+    ],
 }
 
 # ── DOCX→PDF fallback mapping ────────────────────────────────────────
@@ -204,6 +224,15 @@ _DOCX_TO_PDF_FALLBACK: dict[str, list[FixAction]] = {
             params={"scale_factor": 0.9},
             target_issues=["image_overflow"],
             reasoning="DOCX margin adjustments didn't resolve image overflow; scaling PDF as fallback",
+            is_fallback=True,
+        ),
+    ],
+    "inconsistent_indent": [
+        FixAction(
+            tool_name="pdf_scale_content",
+            params={"scale_factor": 0.92},
+            target_issues=["inconsistent_indent"],
+            reasoning="DOCX indent adjustment failed; scaling PDF content as fallback",
             is_fallback=True,
         ),
     ],
@@ -456,6 +485,7 @@ def plan_fixes_rule_based(
         "remove_blank_pages",
         "fix_page_breaks",
         "remove_manual_breaks",
+        "adjust_paragraph_indents",
         "pdf_crop_margins",
         "pdf_scale_content",
         "pdf_rotate_pages",

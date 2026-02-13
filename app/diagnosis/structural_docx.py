@@ -60,6 +60,7 @@ def _analyze_docx_sync(file_path: str, job_id: str) -> list[DiagnosisIssue]:
         issues.extend(_check_fonts(doc))
         issues.extend(_check_tables(doc))
         issues.extend(_check_images(doc))
+        issues.extend(_check_paragraph_indents(doc))
         issues.extend(_check_page_breaks(doc))
         issues.extend(_check_hidden_content(doc))
         issues.extend(_check_tracked_changes(file_path))
@@ -302,6 +303,126 @@ def _check_images(doc) -> list[DiagnosisIssue]:
                                     confidence=0.9,
                                 )
                             )
+
+    return issues
+
+
+def _check_paragraph_indents(doc) -> list[DiagnosisIssue]:
+    """Check for paragraph indents that consume excessive printable width."""
+    issues: list[DiagnosisIssue] = []
+
+    if not doc.sections:
+        return issues
+    section = doc.sections[0]
+    page_width = section.page_width or 0
+    left_margin = section.left_margin or 0
+    right_margin = section.right_margin or 0
+    printable_width = page_width - left_margin - right_margin
+
+    if printable_width <= 0:
+        return issues
+
+    max_indent_emu = int(settings.DIAGNOSIS_MAX_INDENT_INCHES * _EMU_PER_INCH)
+    excessive_locations: list[str] = []
+    max_left_seen = 0
+    max_right_seen = 0
+    has_critical = False
+
+    def _scan_paragraph(para, label: str) -> None:
+        nonlocal max_left_seen, max_right_seen, has_critical
+
+        pf = para.paragraph_format
+        left = pf.left_indent or 0
+        right = pf.right_indent or 0
+        first_line = pf.first_line_indent or 0
+
+        max_left_seen = max(max_left_seen, left)
+        max_right_seen = max(max_right_seen, right)
+
+        already_flagged = False
+
+        # Negative indents: text extends into/past margin toward page edge
+        # left_margin + left_indent < 0 means text goes off the left edge
+        if left < 0 or right < 0:
+            left_in = left / _EMU_PER_INCH
+            right_in = right / _EMU_PER_INCH
+            # Critical if indent pushes text past the margin entirely
+            if left < 0 and left_margin + left < 0:
+                excessive_locations.append(f'{label} (L={left_in:+.2f}" overflows page edge)')
+                has_critical = True
+                already_flagged = True
+            elif left < 0 and left_margin + left < min(left_margin // 2, max_indent_emu // 2):
+                excessive_locations.append(f'{label} (L={left_in:+.2f}" into margin)')
+                already_flagged = True
+            if right < 0 and right_margin + right < 0:
+                excessive_locations.append(f'{label} (R={right_in:+.2f}" overflows page edge)')
+                has_critical = True
+                already_flagged = True
+            elif right < 0 and right_margin + right < min(right_margin // 2, max_indent_emu // 2):
+                excessive_locations.append(f'{label} (R={right_in:+.2f}" into margin)')
+                already_flagged = True
+
+        # Also check negative first-line indent (hanging) that extends past margin
+        if first_line < 0 and left + first_line < 0 and left_margin + left + first_line < 0:
+            fl_in = first_line / _EMU_PER_INCH
+            excessive_locations.append(f'{label} (hanging {fl_in:+.2f}" overflows page edge)')
+            has_critical = True
+            already_flagged = True
+
+        # Positive excessive indents: wastes printable space
+        if not already_flagged and (left > max_indent_emu or right > max_indent_emu):
+            left_in = left / _EMU_PER_INCH
+            right_in = right / _EMU_PER_INCH
+            excessive_locations.append(f'{label} (L={left_in:.2f}" R={right_in:.2f}")')
+
+        # Flag if combined positive indents consume >40% of printable width
+        if not already_flagged:
+            effective_left = left + max(first_line, 0)
+            combined = effective_left + max(right, 0)
+            if combined > printable_width * 0.4:
+                if not any(label in loc for loc in excessive_locations):
+                    combined_in = combined / _EMU_PER_INCH
+                    excessive_locations.append(f"{label} (combined {combined_in:.2f}\")")
+                # Critical if <50% of page left for content
+                if combined > printable_width * 0.5:
+                    has_critical = True
+
+    # Scan body paragraphs
+    for i, para in enumerate(doc.paragraphs, 1):
+        _scan_paragraph(para, f"paragraph {i}")
+
+    # Scan table cells
+    for t_idx, table in enumerate(doc.tables, 1):
+        for row in table.rows:
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    _scan_paragraph(para, f"table {t_idx}")
+
+    if excessive_locations:
+        sample = excessive_locations[:5]
+        max_left_in = max_left_seen / _EMU_PER_INCH
+        max_right_in = max_right_seen / _EMU_PER_INCH
+        severity = IssueSeverity.critical if has_critical else IssueSeverity.warning
+
+        issues.append(
+            DiagnosisIssue(
+                type=IssueType.inconsistent_indent,
+                severity=severity,
+                source=IssueSource.structural,
+                description=(
+                    f"Excessive paragraph indents detected (max L={max_left_in:.2f}\""
+                    f" R={max_right_in:.2f}\") in: "
+                    + ", ".join(sample)
+                    + (
+                        f" and {len(excessive_locations) - 5} more"
+                        if len(excessive_locations) > 5
+                        else ""
+                    )
+                ),
+                suggested_fix="adjust_paragraph_indents",
+                confidence=0.85,
+            )
+        )
 
     return issues
 

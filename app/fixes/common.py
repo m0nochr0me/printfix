@@ -58,7 +58,7 @@ async def re_render_job(job_id: str) -> dict:
 
     Returns updated metadata dict.
     """
-    file_path, file_type = await resolve_document(job_id)
+    file_path, _file_type = await resolve_document(job_id)
 
     logger.info(f"Job {job_id}: re-rendering after fix")
     pdf_path = await convert_to_pdf(file_path, job_id)

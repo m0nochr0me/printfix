@@ -11,6 +11,7 @@ agressiveness: {%- if aggressiveness == "conservative" -%}Only fix critical issu
 available_fix_tools:
   - docx:
     - set_margins(top, bottom, left, right): Set margins in inches on all sections
+    - adjust_paragraph_indents(max_left_inches, max_right_inches, max_first_line_inches, strategy): Adjust paragraph indents with "cap" or "scale" strategy
     - set_page_size(width, height): Set page size in inches (A4=8.27x11.69, Letter=8.5x11)
     - set_orientation(orientation): Set "portrait" or "landscape"
     - remove_blank_pages(): Remove consecutive page breaks creating blank pages
