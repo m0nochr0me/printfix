@@ -147,6 +147,8 @@ async def adjust_paragraph_indents(
     max_right_inches: float = 0.5,
     max_first_line_inches: float = 0.5,
     strategy: str = "cap",
+    paragraph_indices: list[int] | None = None,
+    include_tables: bool = True,
 ) -> str:
     """Adjust paragraph indents in a DOCX to reclaim printable space.
 
@@ -154,12 +156,20 @@ async def adjust_paragraph_indents(
     especially after margins have been tightened.
     Strategy: 'cap' (clamp at max) or 'scale' (proportionally shrink).
     Values in inches.
+    paragraph_indices: optional list of 1-indexed body paragraph numbers to
+    target. Omit to adjust all paragraphs.
+    include_tables: whether to also adjust table cell paragraphs (default true).
     """
     file_path, _ = await resolve_document(job_id)
     result = await _adjust_paragraph_indents(
-        file_path, job_id,
-        max_left_inches, max_right_inches, max_first_line_inches,
+        file_path,
+        job_id,
+        max_left_inches,
+        max_right_inches,
+        max_first_line_inches,
         strategy,
+        paragraph_indices,
+        include_tables,
     )
     if result.success:
         await re_render_job(job_id)
@@ -349,7 +359,10 @@ async def resize_images_to_fit(
     """
     file_path, _ = await resolve_document(job_id)
     result = await _resize_images_to_fit(
-        file_path, job_id, max_width_pct, max_height_pct,
+        file_path,
+        job_id,
+        max_width_pct,
+        max_height_pct,
     )
     if result.success:
         await re_render_job(job_id)
@@ -387,7 +400,11 @@ async def set_xlsx_page_setup(
     """Configure print page setup on all sheets. paper_size: 1=Letter, 9=A4."""
     file_path, _ = await resolve_document(job_id)
     result = await _set_xlsx_page_setup(
-        file_path, job_id, orientation, paper_size, fit_to_page,
+        file_path,
+        job_id,
+        orientation,
+        paper_size,
+        fit_to_page,
     )
     if result.success:
         await re_render_job(job_id)
@@ -410,7 +427,11 @@ async def auto_fit_xlsx_columns(
     """
     file_path, _ = await resolve_document(job_id)
     result = await _auto_fit_xlsx_columns(
-        file_path, job_id, max_col_width, min_col_width, shrink_margins,
+        file_path,
+        job_id,
+        max_col_width,
+        min_col_width,
+        shrink_margins,
     )
     if result.success:
         await re_render_job(job_id)

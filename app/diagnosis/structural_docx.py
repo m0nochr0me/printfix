@@ -324,11 +324,12 @@ def _check_paragraph_indents(doc) -> list[DiagnosisIssue]:
 
     max_indent_emu = int(settings.DIAGNOSIS_MAX_INDENT_INCHES * _EMU_PER_INCH)
     excessive_locations: list[str] = []
+    affected_paragraphs: list[dict] = []  # structured data for fix targeting
     max_left_seen = 0
     max_right_seen = 0
     has_critical = False
 
-    def _scan_paragraph(para, label: str) -> None:
+    def _scan_paragraph(para, label: str, index: int, context: str) -> None:
         nonlocal max_left_seen, max_right_seen, has_critical
 
         pf = para.paragraph_format
@@ -339,6 +340,7 @@ def _check_paragraph_indents(doc) -> list[DiagnosisIssue]:
         max_left_seen = max(max_left_seen, left)
         max_right_seen = max(max_right_seen, right)
 
+        loc_count_before = len(excessive_locations)
         already_flagged = False
 
         # Negative indents: text extends into/past margin toward page edge
@@ -382,21 +384,33 @@ def _check_paragraph_indents(doc) -> list[DiagnosisIssue]:
             if combined > printable_width * 0.4:
                 if not any(label in loc for loc in excessive_locations):
                     combined_in = combined / _EMU_PER_INCH
-                    excessive_locations.append(f"{label} (combined {combined_in:.2f}\")")
+                    excessive_locations.append(f'{label} (combined {combined_in:.2f}")')
                 # Critical if <50% of page left for content
                 if combined > printable_width * 0.5:
                     has_critical = True
 
+        # Record structured data for any flagged paragraph
+        if len(excessive_locations) > loc_count_before:
+            affected_paragraphs.append(
+                {
+                    "index": index,
+                    "context": context,
+                    "left": round(left / _EMU_PER_INCH, 3),
+                    "right": round(right / _EMU_PER_INCH, 3),
+                    "first_line": round(first_line / _EMU_PER_INCH, 3),
+                }
+            )
+
     # Scan body paragraphs
     for i, para in enumerate(doc.paragraphs, 1):
-        _scan_paragraph(para, f"paragraph {i}")
+        _scan_paragraph(para, f"paragraph {i}", index=i, context="body")
 
     # Scan table cells
     for t_idx, table in enumerate(doc.tables, 1):
         for row in table.rows:
             for cell in row.cells:
                 for para in cell.paragraphs:
-                    _scan_paragraph(para, f"table {t_idx}")
+                    _scan_paragraph(para, f"table {t_idx}", index=t_idx, context=f"table_{t_idx}")
 
     if excessive_locations:
         sample = excessive_locations[:5]
@@ -410,17 +424,14 @@ def _check_paragraph_indents(doc) -> list[DiagnosisIssue]:
                 severity=severity,
                 source=IssueSource.structural,
                 description=(
-                    f"Excessive paragraph indents detected (max L={max_left_in:.2f}\""
-                    f" R={max_right_in:.2f}\") in: "
+                    f'Excessive paragraph indents detected (max L={max_left_in:.2f}"'
+                    f' R={max_right_in:.2f}") in: '
                     + ", ".join(sample)
-                    + (
-                        f" and {len(excessive_locations) - 5} more"
-                        if len(excessive_locations) > 5
-                        else ""
-                    )
+                    + (f" and {len(excessive_locations) - 5} more" if len(excessive_locations) > 5 else "")
                 ),
                 suggested_fix="adjust_paragraph_indents",
                 confidence=0.85,
+                metadata={"affected_paragraphs": affected_paragraphs},
             )
         )
 

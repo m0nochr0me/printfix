@@ -196,11 +196,18 @@ async def adjust_paragraph_indents(
     right_inches: float = 0.5,
     first_line_inches: float = 0.5,
     strategy: str = "cap",
+    paragraph_indices: list[int] | None = None,
+    include_tables: bool = True,
 ) -> FixResult:
     """Adjust paragraph indents in a DOCX. Strategy: 'cap' or 'scale'.
 
     - cap: clamp each indent at the specified maximum
     - scale: proportionally shrink all indents so the largest equals the max
+
+    paragraph_indices: optional list of 1-indexed body paragraph numbers to
+    target.  When None, all paragraphs are processed (original behavior).
+    include_tables: whether to also process table cell paragraphs when
+    paragraph_indices is provided (ignored when paragraph_indices is None).
     """
     return await asyncio.to_thread(
         _adjust_paragraph_indents_sync,
@@ -210,6 +217,8 @@ async def adjust_paragraph_indents(
         right_inches,
         first_line_inches,
         strategy,
+        paragraph_indices,
+        include_tables,
     )
 
 
@@ -220,6 +229,8 @@ def _adjust_paragraph_indents_sync(
     right_inches: float,
     first_line_inches: float,
     strategy: str,
+    paragraph_indices: list[int] | None,
+    include_tables: bool,
 ) -> FixResult:
 
     doc = Document(file_path)
@@ -227,12 +238,22 @@ def _adjust_paragraph_indents_sync(
     max_right = Inches(right_inches)
     max_first = Inches(first_line_inches)
 
-    # Collect all paragraphs (body + table cells)
-    all_paras: list = list(doc.paragraphs)
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                all_paras.extend(cell.paragraphs)
+    # Build set of targeted body paragraph indices (1-indexed) for fast lookup
+    target_set: set[int] | None = set(paragraph_indices) if paragraph_indices else None
+
+    # Collect paragraphs to process
+    # Each entry: (paragraph, 1-based body index or 0 for table paras)
+    paras_to_process: list[tuple] = []
+    for i, para in enumerate(doc.paragraphs, 1):
+        if target_set is None or i in target_set:
+            paras_to_process.append((para, i))
+
+    if target_set is None or include_tables:
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for para in cell.paragraphs:
+                        paras_to_process = [*paras_to_process, (para, 0)]
 
     scale_first, scale_left, scale_right = 1.0, 1.0, 1.0
 
@@ -241,7 +262,7 @@ def _adjust_paragraph_indents_sync(
         largest_left = 0
         largest_right = 0
         largest_first = 0
-        for para in all_paras:
+        for para, _ in paras_to_process:
             pf = para.paragraph_format
             largest_left = max(largest_left, pf.left_indent or 0)
             largest_right = max(largest_right, pf.right_indent or 0)
@@ -270,7 +291,7 @@ def _adjust_paragraph_indents_sync(
     old_max_right = 0
     old_min_right = 0
 
-    for para in all_paras:
+    for para, _ in paras_to_process:
         pf = para.paragraph_format
         left = pf.left_indent or 0
         right = pf.right_indent or 0
@@ -339,6 +360,8 @@ def _adjust_paragraph_indents_sync(
     if old_min_right < 0:
         before_parts.append(f'R(neg)={old_min_r:+.2f}"')
 
+    target_desc = f" (targeted {len(paragraph_indices)} paragraph(s))" if paragraph_indices else ""
+
     return FixResult(
         tool_name="adjust_paragraph_indents",
         job_id=job_id,
@@ -346,6 +369,7 @@ def _adjust_paragraph_indents_sync(
         description=(
             f"Adjusted indents on {adjusted} paragraph(s) using '{strategy}' strategy"
             f' (max L={left_inches}" R={right_inches}" FL={first_line_inches}")'
+            f"{target_desc}"
         ),
         before_value="max " + " ".join(before_parts),
         after_value=f'cap L={left_inches}" R={right_inches}" FL={first_line_inches}"',

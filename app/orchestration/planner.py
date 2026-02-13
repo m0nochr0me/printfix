@@ -475,6 +475,22 @@ def plan_fixes_rule_based(
                 # Use the font name from the issue location if available
                 action.params["from_font"] = issue.location
 
+            # For direct inconsistent_indent fixes, forward affected paragraph
+            # indices from diagnosis metadata so only problematic paragraphs
+            # are adjusted (not the entire document).
+            if (
+                action.tool_name == "adjust_paragraph_indents"
+                and issue_type == "inconsistent_indent"
+                and issue.metadata.get("affected_paragraphs")
+            ):
+                body_indices = [p["index"] for p in issue.metadata["affected_paragraphs"] if p.get("context") == "body"]
+                has_table_issues = any(
+                    p.get("context", "").startswith("table_") for p in issue.metadata["affected_paragraphs"]
+                )
+                if body_indices:
+                    action.params["paragraph_indices"] = body_indices
+                action.params["include_tables"] = has_table_issues
+
             # Dedup: skip if we already have this exact tool+params
             dedup_key = f"{action.tool_name}:{json.dumps(action.params, sort_keys=True)}"
             if dedup_key in seen_tools:

@@ -3,6 +3,7 @@ Diagnosis request/response models.
 """
 
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -56,6 +57,10 @@ class DiagnosisIssue(BaseModel):
     description: str
     suggested_fix: str | None = None
     confidence: float = Field(ge=0.0, le=1.0, default=0.8)
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Structured data for fix tools (e.g. affected paragraph indices)",
+    )
 
 
 class StructuralFindings(BaseModel):
@@ -73,7 +78,6 @@ class PageDiagnosis(BaseModel):
 class MergedPageDiagnosis(BaseModel):
     pages: list[PageDiagnosis] = Field(description="List of merged page diagnoses.")
     document_issues: list[DiagnosisIssue] = Field(description="List of document-level issues.")
-
 
 
 class PageDiagnosisFindings(BaseModel):
