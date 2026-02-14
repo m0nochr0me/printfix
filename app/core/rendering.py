@@ -12,6 +12,7 @@ import pikepdf
 from pdf2image import convert_from_path
 from PIL import Image
 
+from app.core.config import settings
 from app.core.log import logger
 from app.core.storage import get_job_dir, save_rendered_page
 
@@ -56,15 +57,54 @@ async def convert_to_pdf(input_path: str, job_id: str, timeout: int = 120) -> st
 
     # LibreOffice headless conversion
     logger.info(f"Job {job_id}: converting {ext} to PDF via LibreOffice")
+    try:
+        dest = await _run_libreoffice_convert(input_path, output_dir, timeout)
+    except (RuntimeError, TimeoutError) as exc:
+        if not settings.ENABLE_REPAIR_ON_INGEST:
+            raise
+        logger.warning(f"Job {job_id}: normal conversion failed ({exc}), retrying with repair mode")
+        dest = await _run_libreoffice_convert_with_repair(
+            input_path,
+            ext,
+            output_dir,
+            timeout,
+        )
+
+    logger.info(f"Job {job_id}: LibreOffice conversion complete → {dest}")
+    return str(dest)
+
+
+_LO_REPAIR_FILTERS: dict[str, str] = {
+    ".docx": "Microsoft Word 2007-2019 XML",
+    ".xlsx": "Calc MS Excel 2007 XML",
+    ".pptx": "Impress MS PowerPoint 2007 XML",
+    ".odt": "writer8",
+    ".ods": "calc8",
+    ".odp": "impress8",
+}
+
+
+async def _run_libreoffice_convert(
+    input_path: str,
+    output_dir: Path,
+    timeout: int,
+) -> str:
+    """Run a standard LibreOffice headless conversion to PDF."""
     proc = await asyncio.create_subprocess_exec(
-        "libreoffice", "--headless", "--norestore", "--convert-to", "pdf",
-        "--outdir", str(output_dir), input_path,
+        "libreoffice",
+        "--headless",
+        "--norestore",
+        "--convert-to",
+        "pdf",
+        "--outdir",
+        str(output_dir),
+        input_path,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
 
     try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        _stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except asyncio.TimeoutError:
         proc.kill()
         raise TimeoutError(f"LibreOffice conversion timed out after {timeout}s")
@@ -73,16 +113,59 @@ async def convert_to_pdf(input_path: str, job_id: str, timeout: int = 120) -> st
         err = stderr.decode().strip()
         raise RuntimeError(f"LibreOffice conversion failed (exit {proc.returncode}): {err}")
 
-    # LibreOffice names the output file with the same stem but .pdf extension
+    return _finalize_lo_output(input_path, output_dir)
+
+
+async def _run_libreoffice_convert_with_repair(
+    input_path: str,
+    ext: str,
+    output_dir: Path,
+    timeout: int,
+) -> str:
+    """Run LibreOffice conversion with infilter repair mode enabled."""
+    filter_name = _LO_REPAIR_FILTERS.get(ext)
+    if not filter_name:
+        raise RuntimeError(f"No repair filter available for {ext}")
+
+    infilter = f"{filter_name}:repairmode"
+    logger.info(f"Using LibreOffice repair filter: {infilter}")
+
+    proc = await asyncio.create_subprocess_exec(
+        "libreoffice",
+        "--headless",
+        "--norestore",
+        f"--infilter={infilter}",
+        "--convert-to",
+        "pdf",
+        "--outdir",
+        str(output_dir),
+        input_path,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    try:
+        _stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        raise TimeoutError(f"LibreOffice repair conversion timed out after {timeout}s")
+
+    if proc.returncode != 0:
+        err = stderr.decode().strip()
+        raise RuntimeError(f"LibreOffice repair conversion failed (exit {proc.returncode}): {err}")
+
+    return _finalize_lo_output(input_path, output_dir)
+
+
+def _finalize_lo_output(input_path: str, output_dir: Path) -> str:
+    """Locate the LibreOffice output PDF, rename to reference.pdf, and return the path."""
     stem = Path(input_path).stem
     pdf_path = output_dir / f"{stem}.pdf"
     if not pdf_path.exists():
         raise FileNotFoundError(f"Expected LibreOffice output at {pdf_path}, but file not found")
 
-    # Rename to reference.pdf for consistency
     dest = output_dir / "reference.pdf"
     pdf_path.rename(dest)
-    logger.info(f"Job {job_id}: LibreOffice conversion complete → {dest}")
     return str(dest)
 
 
@@ -96,7 +179,10 @@ async def render_pages(pdf_path: str, job_id: str, dpi: int = 200) -> list[str]:
 
     # pdf2image is blocking (calls poppler subprocess), run in thread pool
     images: list[Image.Image] = await asyncio.to_thread(
-        convert_from_path, pdf_path, dpi=dpi, fmt="png",
+        convert_from_path,
+        pdf_path,
+        dpi=dpi,
+        fmt="png",
     )
 
     page_paths: list[str] = []
@@ -128,11 +214,13 @@ async def get_pdf_metadata(pdf_path: str) -> dict:
                 width_mm = round(width * 25.4 / 72, 1)
                 height_mm = round(height * 25.4 / 72, 1)
                 orientation = "landscape" if width > height else "portrait"
-                pages_info.append({
-                    "width_mm": width_mm,
-                    "height_mm": height_mm,
-                    "orientation": orientation,
-                })
+                pages_info.append(
+                    {
+                        "width_mm": width_mm,
+                        "height_mm": height_mm,
+                        "orientation": orientation,
+                    }
+                )
             return {
                 "page_count": len(pdf.pages),
                 "pages": pages_info,

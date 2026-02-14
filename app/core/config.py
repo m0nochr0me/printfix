@@ -40,9 +40,17 @@ class Settings(BaseSettings):
     STORAGE_DIR: str = "./data"
     MAX_UPLOAD_SIZE_MB: int = 100
     ALLOWED_EXTENSIONS: list[str] = [
-        ".pdf", ".docx", ".xlsx", ".pptx",
-        ".odt", ".ods", ".odp",
-        ".jpg", ".jpeg", ".png", ".tiff",
+        ".pdf",
+        ".docx",
+        ".xlsx",
+        ".pptx",
+        ".odt",
+        ".ods",
+        ".odp",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".tiff",
     ]
 
     WORKER_CONCURRENCY: int = 2
@@ -72,6 +80,11 @@ class Settings(BaseSettings):
     RATE_LIMIT_WINDOW_SECONDS: int = 60
     REDIS_DB_RATE_LIMIT: int = 5
 
+    # Integrity & repair
+    ENABLE_UPLOAD_VALIDATION: bool = True
+    ENABLE_REPAIR_ON_INGEST: bool = True
+    ENABLE_POST_FIX_VALIDATION: bool = True
+    LIBREOFFICE_REPAIR_TIMEOUT_SECONDS: int = 180
 
     class Config:
         env_file = ".env"

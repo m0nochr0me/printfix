@@ -17,6 +17,7 @@ from app.core.ai import ai_client
 from app.core.cache import cache, make_cache_key
 from app.core.config import settings
 from app.core.effort import EffortConfig, get_effort_config
+from app.core.integrity import attempt_libreoffice_repair, validate_file
 from app.core.log import logger
 from app.core.prompts import get_prompt
 from app.core.rendering import convert_to_pdf, get_pdf_metadata, render_pages
@@ -156,6 +157,33 @@ async def ingest_document(job_id: str, file_path: str, original_filename: str) -
             "ingesting",
             extra={"file_type": ext, "file_size_bytes": file_size},
         )
+
+        # -- Step 1b: File integrity check --
+        if settings.ENABLE_REPAIR_ON_INGEST:
+            await JobStateManager.set_state(job_id, "validating")
+            integrity = await validate_file(file_path, ext)
+
+            if not integrity.valid:
+                logger.warning(
+                    f"Job {job_id}: file integrity check failed — {integrity.details}, attempting LibreOffice repair"
+                )
+                repair_result = await attempt_libreoffice_repair(
+                    file_path,
+                    ext,
+                    _timeout=settings.LIBREOFFICE_REPAIR_TIMEOUT_SECONDS,
+                )
+                if repair_result.repaired:
+                    logger.info(f"Job {job_id}: file repaired successfully via {repair_result.repair_method}")
+                    await JobStateManager.set_state(
+                        job_id,
+                        "ingesting",
+                        extra={
+                            "file_repaired": "true",
+                            "repair_method": repair_result.repair_method or "libreoffice",
+                        },
+                    )
+                else:
+                    raise ValueError(f"File is corrupt and could not be repaired: {repair_result.details}")
 
         # -- Step 2: Convert to PDF --
         await JobStateManager.set_state(job_id, "converting")

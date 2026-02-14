@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 class JobStatus(StrEnum):
     uploaded = "uploaded"
+    validating = "validating"
     ingesting = "ingesting"
     converting = "converting"
     rendering = "rendering"

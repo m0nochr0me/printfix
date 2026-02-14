@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any, Callable, Coroutine
 
 from app.core.config import settings
+from app.core.integrity import cleanup_backup, create_backup, validate_after_fix
 from app.core.log import logger
 from app.fixes.cleanup import accept_tracked_changes, normalize_styles, remove_empty_paragraphs, strip_hidden_text
 from app.fixes.common import re_render_job, record_fix, resolve_document
@@ -133,12 +134,18 @@ async def execute_fix(job_id: str, action: FixAction) -> FixResult:
         return result
 
     fix_func, is_pdf = TOOL_REGISTRY[tool_name]
+    backup_path: str | None = None
 
     try:
         if is_pdf:
             file_path = await _get_pdf_path(job_id)
+            file_type_ext = ".pdf"
         else:
-            file_path, _ = await resolve_document(job_id)
+            file_path, file_type_ext = await resolve_document(job_id)
+
+        # Create backup before applying the fix
+        if settings.ENABLE_POST_FIX_VALIDATION:
+            backup_path = await create_backup(file_path)
 
         result = await asyncio.wait_for(
             fix_func(file_path, job_id, **action.params),
@@ -146,6 +153,25 @@ async def execute_fix(job_id: str, action: FixAction) -> FixResult:
         )
 
         if result.success:
+            # Validate the output file wasn't corrupted by the fix
+            if settings.ENABLE_POST_FIX_VALIDATION and backup_path:
+                post_check = await validate_after_fix(file_path, file_type_ext, backup_path)
+                backup_path = None  # handled by validate_after_fix
+                if not post_check.valid:
+                    logger.error(
+                        f"Job {job_id}: {tool_name} corrupted the file, restored from backup — {post_check.details}"
+                    )
+                    result = FixResult(
+                        tool_name=tool_name,
+                        job_id=job_id,
+                        success=False,
+                        description=f"{tool_name} produced corrupt output, file restored from backup",
+                        error=f"Post-fix validation failed: {post_check.details}",
+                        timestamp=datetime.now(UTC),
+                    )
+                    await record_fix(job_id, result)
+                    return result
+
             await re_render_job(job_id)
 
         await record_fix(job_id, result)
@@ -182,6 +208,11 @@ async def execute_fix(job_id: str, action: FixAction) -> FixResult:
         await record_fix(job_id, result)
         logger.error(f"Job {job_id}: {tool_name} raised {exc}")
         return result
+
+    finally:
+        # Clean up backup if it wasn't already handled
+        if backup_path:
+            await cleanup_backup(backup_path)
 
 
 async def execute_plan(
