@@ -5,6 +5,7 @@ import re
 import zipfile
 
 from docx import Document
+from docx.oxml.ns import qn
 
 from app.core.config import settings
 from app.core.log import logger
@@ -63,6 +64,7 @@ def _analyze_docx_sync(file_path: str, job_id: str) -> list[DiagnosisIssue]:
         issues.extend(_check_paragraph_indents(doc))
         issues.extend(_check_page_breaks(doc))
         issues.extend(_check_hidden_content(doc))
+        issues.extend(_check_columns(doc))
         issues.extend(_check_tracked_changes(file_path))
     except Exception:
         logger.exception(f"Job {job_id}: DOCX structural analysis failed")
@@ -510,6 +512,29 @@ def _check_hidden_content(doc) -> list[DiagnosisIssue]:
             )
         )
 
+    return issues
+
+
+def _check_columns(doc) -> list[DiagnosisIssue]:
+    """Check for multi-column layouts."""
+    issues: list[DiagnosisIssue] = []
+
+    for i, section in enumerate(doc.sections, 1):
+        sectPr = section._sectPr
+        cols = sectPr.xpath("./w:cols")
+        if cols:
+            num = cols[0].get(qn("w:num"))
+            if num and int(num) > 1:
+                issues.append(
+                    DiagnosisIssue(
+                        type=IssueType.multi_column_layout,
+                        severity=IssueSeverity.info,
+                        source=IssueSource.structural,
+                        description=f"Section {i} uses a multi-column layout ({num} columns). This may cause layout issues during conversion.",
+                        suggested_fix="set_columns",
+                        metadata={"section_indices": [i], "current_columns": int(num)},
+                    )
+                )
     return issues
 
 

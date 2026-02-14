@@ -42,6 +42,9 @@ from app.fixes.page_layout import (
     remove_blank_pages as _remove_blank_pages,
 )
 from app.fixes.page_layout import (
+    set_columns as _set_columns,
+)
+from app.fixes.page_layout import (
     set_margins as _set_margins,
 )
 from app.fixes.page_layout import (
@@ -171,6 +174,20 @@ async def set_orientation(
     """Set page orientation. Must be 'portrait' or 'landscape'."""
     file_path, _ = await resolve_document(job_id)
     result = await _set_orientation(file_path, job_id, orientation)
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+@server.tool()
+async def set_columns(
+    job_id: str,
+    columns: int,
+) -> str:
+    """Set the number of columns for the document (e.g. 1 for single column, 2 for dual)."""
+    file_path, _ = await resolve_document(job_id)
+    result = await _set_columns(file_path, job_id, columns)
     if result.success:
         await re_render_job(job_id)
     await record_fix(job_id, result)

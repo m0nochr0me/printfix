@@ -14,6 +14,7 @@ available_fix_tools:
     - adjust_paragraph_indents(left_inches, right_inches, first_line_inches, paragraph_indices, include_tables): Adjust paragraph indents. paragraph_indices is an optional list of 1-indexed body paragraph numbers to target (omit to adjust all). include_tables controls whether table cell paragraphs are also adjusted (default true).
     - set_page_size(width, height): Set page size in inches (A4=8.27x11.69, Letter=8.5x11)
     - set_orientation(orientation): Set "portrait" or "landscape"
+    - set_columns(columns): Set number of columns (1 for single, 2 for dual). Use to simplify multi-column layouts.
     - remove_blank_pages(): Remove consecutive page breaks creating blank pages
     - replace_font(from_font, to_font): Replace all occurrences of a font
     - adjust_font_size(min_size_pt, max_size_pt): Clamp font sizes to range in points

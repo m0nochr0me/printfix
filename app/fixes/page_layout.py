@@ -6,6 +6,7 @@ import asyncio
 
 from docx import Document
 from docx.enum.section import WD_ORIENT
+from docx.oxml.ns import qn
 from docx.shared import Inches
 
 from app.schema.fix import FixResult
@@ -13,6 +14,7 @@ from app.schema.fix import FixResult
 __all__ = (
     "adjust_paragraph_indents",
     "remove_blank_pages",
+    "set_columns",
     "set_margins",
     "set_orientation",
     "set_page_size",
@@ -152,6 +154,70 @@ def _set_orientation_sync(
         success=True,
         description=f"Set orientation to {orientation} ({changed} section(s) changed)",
         after_value=orientation,
+    )
+
+
+async def set_columns(
+    file_path: str,
+    job_id: str,
+    columns: int = 1,
+) -> FixResult:
+    """Set the number of columns for all sections in the document.
+
+    Args:
+        file_path: Path to the DOCX file.
+        job_id: The job ID.
+        columns: Number of columns (1 for single column).
+    """
+    return await asyncio.to_thread(_set_columns_sync, file_path, job_id, columns)
+
+
+def _set_columns_sync(
+    file_path: str,
+    job_id: str,
+    columns: int,
+) -> FixResult:
+    doc = Document(file_path)
+    changed = 0
+
+    for section in doc.sections:
+        sect_pr = section._sectPr
+        cols_list = sect_pr.xpath("./w:cols")
+        if not cols_list:
+            cols = sect_pr.makeelement(qn("w:cols"))
+            sect_pr.append(cols)
+        else:
+            cols = cols_list[0]
+
+        # Check current value
+        current_cols = cols.get(qn("w:num"))
+        if current_cols is None:
+            current_cols = "1"
+
+        if str(current_cols) != str(columns):
+            cols.set(qn("w:num"), str(columns))
+            # Reset space/width if going back to 1, or set default space
+            if columns == 1:
+                # Remove attributes related to columns to reset to clean 1-col
+                if qn("w:space") in cols.attrib:
+                    del cols.attrib[qn("w:space")]
+                if qn("w:sep") in cols.attrib:
+                    del cols.attrib[qn("w:sep")]
+                # Or just clear it? But we want to keep w:cols if we want to be explicit?
+                # Actually w:cols with w:num="1" is standard.
+            # Set default spacing (0.5 inch = 720 twips) if not present
+            elif qn("w:space") not in cols.attrib:
+                cols.set(qn("w:space"), "720")
+
+            changed += 1
+
+    doc.save(file_path)
+    return FixResult(
+        tool_name="set_columns",
+        job_id=job_id,
+        success=True,
+        description=f"Set column count to {columns} on {changed} section(s)",
+        after_value=str(columns),
     )
 
 

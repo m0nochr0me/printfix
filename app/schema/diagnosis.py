@@ -38,6 +38,7 @@ class IssueType(StrEnum):
     slide_size_mismatch = "slide_size_mismatch"
     text_outside_printable = "text_outside_printable"
     inconsistent_indent = "inconsistent_indent"
+    multi_column_layout = "multi_column_layout"
 
 
 class IssueSource(StrEnum):

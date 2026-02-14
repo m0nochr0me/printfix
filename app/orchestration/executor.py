@@ -16,6 +16,7 @@ from app.fixes.page_breaks import fix_page_breaks, remove_manual_breaks
 from app.fixes.page_layout import (
     adjust_paragraph_indents,
     remove_blank_pages,
+    set_columns,
     set_margins,
     set_orientation,
     set_page_size,
@@ -68,6 +69,7 @@ TOOL_REGISTRY: dict[str, tuple[FixFunc, bool]] = {
     "adjust_paragraph_indents": (adjust_paragraph_indents, False),
     "set_margins": (set_margins, False),
     "set_page_size": (set_page_size, False),
+    "set_columns": (set_columns, False),
     "set_orientation": (set_orientation, False),
     "remove_blank_pages": (remove_blank_pages, False),
     "replace_font": (replace_font, False),
