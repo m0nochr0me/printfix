@@ -7,7 +7,28 @@ from typing import Annotated
 from fastmcp import FastMCP
 
 from app.core.log import logger
+from app.fixes.cleanup import (
+    accept_tracked_changes as _accept_tracked_changes,
+)
+from app.fixes.cleanup import (
+    normalize_styles as _normalize_styles,
+)
+from app.fixes.cleanup import (
+    remove_empty_paragraphs as _remove_empty_paragraphs,
+)
+from app.fixes.cleanup import (
+    strip_hidden_text as _strip_hidden_text,
+)
 from app.fixes.common import re_render_job, record_fix, resolve_document
+from app.fixes.images import (
+    check_image_dpi as _check_image_dpi,
+)
+from app.fixes.images import (
+    convert_pdf_colorspace as _convert_pdf_colorspace,
+)
+from app.fixes.images import (
+    resize_images_to_fit as _resize_images_to_fit,
+)
 from app.fixes.page_breaks import (
     fix_page_breaks as _fix_page_breaks,
 )
@@ -29,38 +50,35 @@ from app.fixes.page_layout import (
 from app.fixes.page_layout import (
     set_page_size as _set_page_size,
 )
-from app.fixes.images import (
-    check_image_dpi as _check_image_dpi,
-)
-from app.fixes.images import (
-    convert_pdf_colorspace as _convert_pdf_colorspace,
-)
-from app.fixes.images import (
-    resize_images_to_fit as _resize_images_to_fit,
-)
-from app.fixes.pptx import (
-    adjust_pptx_font_size as _adjust_pptx_font_size,
-)
-from app.fixes.pptx import (
-    set_pptx_slide_size as _set_pptx_slide_size,
-)
-from app.fixes.xlsx import (
-    set_xlsx_margins as _set_xlsx_margins,
-)
-from app.fixes.xlsx import (
-    set_xlsx_page_setup as _set_xlsx_page_setup,
-)
-from app.fixes.xlsx import (
-    auto_fit_xlsx_columns as _auto_fit_xlsx_columns,
-)
 from app.fixes.pdf_fallback import (
     pdf_crop_margins as _pdf_crop_margins,
+)
+from app.fixes.pdf_fallback import (
+    pdf_embed_fonts as _pdf_embed_fonts,
+)
+from app.fixes.pdf_fallback import (
+    pdf_normalize_page_sizes as _pdf_normalize_page_sizes,
 )
 from app.fixes.pdf_fallback import (
     pdf_rotate_pages as _pdf_rotate_pages,
 )
 from app.fixes.pdf_fallback import (
     pdf_scale_content as _pdf_scale_content,
+)
+from app.fixes.pptx import (
+    adjust_pptx_font_size as _adjust_pptx_font_size,
+)
+from app.fixes.pptx import (
+    replace_pptx_font as _replace_pptx_font,
+)
+from app.fixes.pptx import (
+    reposition_pptx_shapes as _reposition_pptx_shapes,
+)
+from app.fixes.pptx import (
+    resize_pptx_text_boxes as _resize_pptx_text_boxes,
+)
+from app.fixes.pptx import (
+    set_pptx_slide_size as _set_pptx_slide_size,
 )
 from app.fixes.tables import (
     auto_fit_tables as _auto_fit_tables,
@@ -72,7 +90,37 @@ from app.fixes.typography import (
     adjust_font_size as _adjust_font_size,
 )
 from app.fixes.typography import (
+    normalize_paragraph_spacing as _normalize_paragraph_spacing,
+)
+from app.fixes.typography import (
     replace_font as _replace_font,
+)
+from app.fixes.typography import (
+    set_line_spacing as _set_line_spacing,
+)
+from app.fixes.typography import (
+    set_widow_orphan_control as _set_widow_orphan_control,
+)
+from app.fixes.xlsx import (
+    adjust_xlsx_font_size as _adjust_xlsx_font_size,
+)
+from app.fixes.xlsx import (
+    auto_fit_xlsx_columns as _auto_fit_xlsx_columns,
+)
+from app.fixes.xlsx import (
+    replace_xlsx_font as _replace_xlsx_font,
+)
+from app.fixes.xlsx import (
+    scale_xlsx_row_heights as _scale_xlsx_row_heights,
+)
+from app.fixes.xlsx import (
+    set_xlsx_margins as _set_xlsx_margins,
+)
+from app.fixes.xlsx import (
+    set_xlsx_page_setup as _set_xlsx_page_setup,
+)
+from app.fixes.xlsx import (
+    set_xlsx_print_area as _set_xlsx_print_area,
 )
 
 __all__ = ("server",)
@@ -465,6 +513,250 @@ async def adjust_pptx_font_size(
     """Enforce minimum font size across all text in a PPTX presentation."""
     file_path, _ = await resolve_document(job_id)
     result = await _adjust_pptx_font_size(file_path, job_id, min_size_pt)
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+@server.tool()
+async def reposition_pptx_shapes(
+    job_id: str,
+    margin_inches: float = 0.25,
+) -> str:
+    """Move shapes that extend beyond printable area back inside slide bounds."""
+    file_path, _ = await resolve_document(job_id)
+    result = await _reposition_pptx_shapes(file_path, job_id, margin_inches)
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+@server.tool()
+async def replace_pptx_font(
+    job_id: str,
+    from_font: str,
+    to_font: str,
+) -> str:
+    """Replace all occurrences of a font in a PPTX presentation."""
+    file_path, _ = await resolve_document(job_id)
+    result = await _replace_pptx_font(file_path, job_id, from_font, to_font)
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+@server.tool()
+async def resize_pptx_text_boxes(
+    job_id: str,
+    strategy: str = "shrink_text",
+) -> str:
+    """Resize text boxes to fit content. Strategy: 'shrink_text' or 'grow'."""
+    file_path, _ = await resolve_document(job_id)
+    result = await _resize_pptx_text_boxes(file_path, job_id, strategy)
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+# -- XLSX Extended Tools --
+
+
+@server.tool()
+async def adjust_xlsx_font_size(
+    job_id: str,
+    min_size_pt: float | None = None,
+    max_size_pt: float | None = None,
+) -> str:
+    """Clamp cell font sizes to a min/max range across all XLSX sheets."""
+    file_path, _ = await resolve_document(job_id)
+    result = await _adjust_xlsx_font_size(file_path, job_id, min_size_pt, max_size_pt)
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+@server.tool()
+async def replace_xlsx_font(
+    job_id: str,
+    from_font: str,
+    to_font: str,
+) -> str:
+    """Replace all occurrences of a font across all XLSX sheets."""
+    file_path, _ = await resolve_document(job_id)
+    result = await _replace_xlsx_font(file_path, job_id, from_font, to_font)
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+@server.tool()
+async def set_xlsx_print_area(
+    job_id: str,
+    area: str | None = None,
+) -> str:
+    """Set print area on XLSX sheets that lack one. Auto-detects if area omitted."""
+    file_path, _ = await resolve_document(job_id)
+    result = await _set_xlsx_print_area(file_path, job_id, area)
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+@server.tool()
+async def scale_xlsx_row_heights(
+    job_id: str,
+    auto_fit: bool = True,
+) -> str:
+    """Auto-fit row heights to cell content across all XLSX sheets."""
+    file_path, _ = await resolve_document(job_id)
+    result = await _scale_xlsx_row_heights(file_path, job_id, auto_fit)
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+# -- DOCX Cleanup Tools --
+
+
+@server.tool()
+async def accept_tracked_changes(job_id: str) -> str:
+    """Accept all tracked changes in a DOCX (insertions kept, deletions removed)."""
+    file_path, _ = await resolve_document(job_id)
+    result = await _accept_tracked_changes(file_path, job_id)
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+@server.tool()
+async def strip_hidden_text(job_id: str) -> str:
+    """Remove hidden text runs from a DOCX document."""
+    file_path, _ = await resolve_document(job_id)
+    result = await _strip_hidden_text(file_path, job_id)
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+@server.tool()
+async def remove_empty_paragraphs(
+    job_id: str,
+    max_consecutive: int = 1,
+) -> str:
+    """Collapse runs of empty paragraphs to at most max_consecutive."""
+    file_path, _ = await resolve_document(job_id)
+    result = await _remove_empty_paragraphs(file_path, job_id, max_consecutive)
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+# -- DOCX Typography & Spacing Tools --
+
+
+@server.tool()
+async def set_widow_orphan_control(
+    job_id: str,
+    enable: bool = True,
+) -> str:
+    """Enable or disable widow/orphan control on all paragraphs."""
+    file_path, _ = await resolve_document(job_id)
+    result = await _set_widow_orphan_control(file_path, job_id, enable)
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+@server.tool()
+async def normalize_paragraph_spacing(
+    job_id: str,
+    before_pt: float = 0.0,
+    after_pt: float = 8.0,
+) -> str:
+    """Standardize paragraph spacing. Skips headings. Values in points."""
+    file_path, _ = await resolve_document(job_id)
+    result = await _normalize_paragraph_spacing(file_path, job_id, before_pt, after_pt)
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+@server.tool()
+async def set_line_spacing(
+    job_id: str,
+    spacing: float = 1.15,
+    rule: str = "multiple",
+) -> str:
+    """Force consistent line spacing. rule: 'multiple', 'exact', 'at_least'."""
+    file_path, _ = await resolve_document(job_id)
+    result = await _set_line_spacing(file_path, job_id, spacing, rule)
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+@server.tool()
+async def normalize_styles(
+    job_id: str,
+    target_body_font: str = "Calibri",
+    target_body_size_pt: float = 11.0,
+    normalize_line_spacing: bool = True,
+) -> str:
+    """Normalize body text to consistent font, size, and line spacing.
+
+    Preserves heading hierarchy. Targets body paragraphs and table cells.
+    """
+    file_path, _ = await resolve_document(job_id)
+    result = await _normalize_styles(
+        file_path,
+        job_id,
+        target_body_font,
+        target_body_size_pt,
+        normalize_line_spacing,
+    )
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+# -- PDF Extended Tools --
+
+
+@server.tool()
+async def pdf_normalize_page_sizes(
+    job_id: str,
+    target_width: float = 8.27,
+    target_height: float = 11.69,
+) -> str:
+    """Normalize all PDF pages to the same size. Default A4 (8.27x11.69)."""
+    pdf_path = await _get_pdf_path(job_id)
+    result = await _pdf_normalize_page_sizes(pdf_path, job_id, target_width, target_height)
+    if result.success:
+        await re_render_job(job_id)
+    await record_fix(job_id, result)
+    return result.model_dump_json()
+
+
+@server.tool()
+async def pdf_embed_fonts(job_id: str) -> str:
+    """Embed non-embedded fonts in a PDF using Ghostscript."""
+    pdf_path = await _get_pdf_path(job_id)
+    result = await _pdf_embed_fonts(pdf_path, job_id)
     if result.success:
         await re_render_job(job_id)
     await record_fix(job_id, result)

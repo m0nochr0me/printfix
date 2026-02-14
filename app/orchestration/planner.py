@@ -163,6 +163,38 @@ _DOCX_ISSUE_MAP: dict[str, list[FixAction]] = {
             reasoning="Cap excessive paragraph indents to reclaim printable space",
         ),
     ],
+    "tracked_changes": [
+        FixAction(
+            tool_name="accept_tracked_changes",
+            params={},
+            target_issues=["tracked_changes"],
+            reasoning="Accept all tracked changes to produce clean output for printing",
+        ),
+    ],
+    "hidden_content": [
+        FixAction(
+            tool_name="strip_hidden_text",
+            params={},
+            target_issues=["hidden_content"],
+            reasoning="Remove hidden text that may cause spacing anomalies in print",
+        ),
+    ],
+    "orphan_widow": [
+        FixAction(
+            tool_name="set_widow_orphan_control",
+            params={"enable": True},
+            target_issues=["orphan_widow"],
+            reasoning="Enable widow/orphan control to prevent stranded lines",
+        ),
+    ],
+    "visual_inconsistency": [
+        FixAction(
+            tool_name="normalize_paragraph_spacing",
+            params={"before_pt": 0.0, "after_pt": 8.0},
+            target_issues=["visual_inconsistency"],
+            reasoning="Standardize paragraph spacing to reduce visual inconsistency",
+        ),
+    ],
 }
 
 # ── DOCX→PDF fallback mapping ────────────────────────────────────────
@@ -306,7 +338,23 @@ _PDF_ISSUE_MAP: dict[str, list[FixAction]] = {
             tool_name="check_image_dpi",
             params={"min_dpi": 150},
             target_issues=["low_dpi_image"],
-            reasoning="Flag low-DPI images that may print poorly",
+            reasoning="Flag low-DPI images that may print poorly (diagnostic only)",
+        ),
+    ],
+    "page_size_mismatch": [
+        FixAction(
+            tool_name="pdf_normalize_page_sizes",
+            params={"target_width": 8.27, "target_height": 11.69},
+            target_issues=["page_size_mismatch"],
+            reasoning="Normalize all pages to A4 for consistent print output",
+        ),
+    ],
+    "non_embedded_font": [
+        FixAction(
+            tool_name="pdf_embed_fonts",
+            params={},
+            target_issues=["non_embedded_font"],
+            reasoning="Embed non-embedded fonts to ensure consistent rendering",
         ),
     ],
 }
@@ -344,6 +392,30 @@ _XLSX_ISSUE_MAP: dict[str, list[FixAction]] = {
             reasoning="Auto-fit columns with smart orientation selection for wide sheets",
         ),
     ],
+    "small_font": [
+        FixAction(
+            tool_name="adjust_xlsx_font_size",
+            params={"min_size_pt": 10.0},
+            target_issues=["small_font"],
+            reasoning="Enforce minimum readable font size in cells",
+        ),
+    ],
+    "non_embedded_font": [
+        FixAction(
+            tool_name="replace_xlsx_font",
+            params={"from_font": "", "to_font": "Arial"},
+            target_issues=["non_embedded_font"],
+            reasoning="Replace non-embedded font with safe default",
+        ),
+    ],
+    "no_print_area": [
+        FixAction(
+            tool_name="set_xlsx_print_area",
+            params={},
+            target_issues=["no_print_area"],
+            reasoning="Set print area to used range on sheets lacking one",
+        ),
+    ],
 }
 
 _PPTX_ISSUE_MAP: dict[str, list[FixAction]] = {
@@ -365,10 +437,26 @@ _PPTX_ISSUE_MAP: dict[str, list[FixAction]] = {
     ],
     "text_overflow": [
         FixAction(
-            tool_name="adjust_pptx_font_size",
-            params={"min_size_pt": 10.0},
+            tool_name="resize_pptx_text_boxes",
+            params={"strategy": "shrink_text"},
             target_issues=["text_overflow"],
-            reasoning="Adjust font sizes to help prevent text overflow",
+            reasoning="Shrink text to fit within text boxes",
+        ),
+    ],
+    "text_outside_printable": [
+        FixAction(
+            tool_name="reposition_pptx_shapes",
+            params={"margin_inches": 0.25},
+            target_issues=["text_outside_printable"],
+            reasoning="Move shapes inside the printable area with safe margin",
+        ),
+    ],
+    "non_embedded_font": [
+        FixAction(
+            tool_name="replace_pptx_font",
+            params={"from_font": "", "to_font": "Arial"},
+            target_issues=["non_embedded_font"],
+            reasoning="Replace non-embedded font with safe default",
         ),
     ],
 }
@@ -475,6 +563,10 @@ def plan_fixes_rule_based(
                 # Use the font name from the issue location if available
                 action.params["from_font"] = issue.location
 
+            # Also propagate font name for XLSX/PPTX font replacement
+            if action.tool_name in ("replace_xlsx_font", "replace_pptx_font") and issue.location:
+                action.params["from_font"] = issue.location
+
             # For direct inconsistent_indent fixes, forward affected paragraph
             # indices from diagnosis metadata so only problematic paragraphs
             # are adjusted (not the entire document).
@@ -508,13 +600,23 @@ def plan_fixes_rule_based(
         "fix_page_breaks",
         "remove_manual_breaks",
         "adjust_paragraph_indents",
+        "accept_tracked_changes",
+        "strip_hidden_text",
+        "remove_empty_paragraphs",
+        "normalize_styles",
+        "set_widow_orphan_control",
         "pdf_crop_margins",
         "pdf_scale_content",
         "pdf_rotate_pages",
+        "pdf_normalize_page_sizes",
+        "pdf_embed_fonts",
         "set_xlsx_margins",
         "set_xlsx_page_setup",
+        "set_xlsx_print_area",
         "auto_fit_xlsx_columns",
         "resize_images_to_fit",
+        "reposition_pptx_shapes",
+        "set_pptx_slide_size",
     }
     actions.sort(
         key=lambda a: (

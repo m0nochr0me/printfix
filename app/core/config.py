@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     LOG_MESSAGE_MAX_LEN: int = 2000
 
     APP_HOST: str = "0.0.0.0"
-    APP_PORT: int = 4201
+    APP_PORT: int = 8083
     APP_WORKERS: int = 1
     APP_AUTH_KEY: str
     TRANSPORT: Literal["stdio", "http", "sse", "streamable-http"] = "streamable-http"

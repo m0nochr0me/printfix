@@ -22,14 +22,33 @@ available_fix_tools:
     - resize_images_to_fit(max_width_pct, max_height_pct): Proportionally resize images that exceed the printable area (default 100% width, 90% height). Preserves aspect ratio.
     - fix_page_breaks(strategy): Fix breaks: "remove_consecutive" or "remove_all"
     - remove_manual_breaks(): Remove all manual page breaks
+    - accept_tracked_changes(): Accept all tracked changes (insertions kept, deletions removed). Use when tracked_changes issue is diagnosed.
+    - strip_hidden_text(): Remove hidden text runs (w:vanish). Use when hidden_content issue is diagnosed.
+    - remove_empty_paragraphs(max_consecutive): Collapse runs of empty paragraphs to at most max_consecutive (default 1). Finer-grained than remove_blank_pages.
+    - set_widow_orphan_control(enable): Enable/disable widow/orphan control on all paragraphs. Use when orphan_widow issues are found.
+    - normalize_paragraph_spacing(before_pt, after_pt): Standardize paragraph spacing. Skips headings. Use for visual_inconsistency.
+    - set_line_spacing(spacing, rule): Force consistent line spacing. rule: "multiple" (1.0/1.15/1.5/2.0), "exact", "at_least". Skips headings.
+    - normalize_styles(target_body_font, target_body_size_pt, normalize_line_spacing): Normalize body text to consistent font/size/spacing. Preserves heading hierarchy. Use for severe visual_inconsistency (e.g. copy-paste chaos with many fonts and sizes).
   - xlsx:
     - set_xlsx_margins(top, bottom, left, right): Set print margins in inches
     - set_xlsx_page_setup(orientation, paper_size, fit_to_page): Page setup (1=Letter, 9=A4)
     - auto_fit_xlsx_columns(max_col_width, min_col_width, shrink_margins): Auto-size columns to fit within a single page width, auto-selects orientation, tightens margins, and enables fit-to-page. Use when columns overflow onto additional pages.
+    - adjust_xlsx_font_size(min_size_pt, max_size_pt): Clamp cell font sizes to a min/max range
+    - replace_xlsx_font(from_font, to_font): Replace fonts across all cells
+    - set_xlsx_print_area(area): Set print area on sheets lacking one. area is optional (auto-detects used range if omitted).
+    - scale_xlsx_row_heights(auto_fit): Auto-fit row heights to cell content
+  - pptx:
+    - set_pptx_slide_size(width, height): Set slide dimensions in inches
+    - adjust_pptx_font_size(min_size_pt): Enforce minimum font size across all text
+    - reposition_pptx_shapes(margin_inches): Move shapes that extend beyond printable area back inside slide bounds. Default margin 0.25".
+    - replace_pptx_font(from_font, to_font): Replace fonts across all text in presentation
+    - resize_pptx_text_boxes(strategy): Resize text boxes to fit content. strategy: "shrink_text" (auto-shrink text) or "grow" (expand box).
   - pdf:
     - pdf_crop_margins(top, bottom, left, right): Adjust CropBox in inches inset
     - pdf_scale_content(scale_factor): Scale content (0.9 = shrink to 90%)
     - pdf_rotate_pages(pages, angle): Rotate pages (angle: 0/90/180/270, pages: 1-indexed list or null for all)
+    - pdf_normalize_page_sizes(target_width, target_height): Normalize all pages to same size (default A4). Scales content proportionally.
+    - pdf_embed_fonts(): Embed non-embedded fonts via Ghostscript. Use when non_embedded_font is diagnosed for PDFs.
 guidelines:
   - Order actions so that structural changes (margins, page size) come before \
   content changes (fonts, tables)

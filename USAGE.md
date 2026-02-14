@@ -5,7 +5,7 @@ All requests require a Bearer token set via the `PFX_APP_AUTH_KEY` environment v
 ```bash
 # Set your token (must match PFX_APP_AUTH_KEY in .env)
 TOKEN="your-secret-token"
-BASE="http://localhost:4201"
+BASE="http://localhost:8083"
 ```
 
 ---
@@ -32,13 +32,13 @@ curl -X POST "$BASE/v1/jobs" \
 
 **Parameters:**
 
-| Field              | Values                                            | Default      |
-|--------------------|---------------------------------------------------|--------------|
+| Field              | Values                                                                             | Default      |
+|--------------------|------------------------------------------------------------------------------------|--------------|
 | `file`             | `.pdf`, `.docx`, `.xlsx`, `.pptx`, `.odt`, `.ods`, `.odp`, `.jpg`, `.png`, `.tiff` | *(required)* |
-| `effort`           | `quick`, `standard`, `thorough`                   | `standard`   |
-| `aggressiveness`   | `conservative`, `moderate`, `aggressive`, `smart_auto` | `smart_auto` |
-| `target_page_size` | `a4`, `letter`, `original`                        | *(none)*     |
-| `target_colorspace`| `cmyk`, `rgb`, `original`                         | *(none)*     |
+| `effort`           | `quick`, `standard`, `thorough`                                                    | `standard`   |
+| `aggressiveness`   | `conservative`, `moderate`, `aggressive`, `smart_auto`                             | `smart_auto` |
+| `target_page_size` | `a4`, `letter`, `original`                                                         | *(none)*     |
+| `target_colorspace`| `cmyk`, `rgb`, `original`                                                          | *(none)*     |
 
 **Response** (202 Accepted):
 
@@ -231,7 +231,7 @@ curl -X DELETE "$BASE/v1/jobs/$JOB_ID" \
 
 ```bash
 TOKEN="your-secret-token"
-BASE="http://localhost:4201"
+BASE="http://localhost:8083"
 
 # 1. Upload
 JOB_ID=$(curl -s -X POST "$BASE/v1/jobs" \

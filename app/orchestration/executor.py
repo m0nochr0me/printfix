@@ -8,6 +8,7 @@ from typing import Any, Callable, Coroutine
 
 from app.core.config import settings
 from app.core.log import logger
+from app.fixes.cleanup import accept_tracked_changes, normalize_styles, remove_empty_paragraphs, strip_hidden_text
 from app.fixes.common import re_render_job, record_fix, resolve_document
 from app.fixes.images import check_image_dpi, convert_pdf_colorspace, resize_images_to_fit
 from app.fixes.page_breaks import fix_page_breaks, remove_manual_breaks
@@ -18,11 +19,37 @@ from app.fixes.page_layout import (
     set_orientation,
     set_page_size,
 )
-from app.fixes.pdf_fallback import pdf_crop_margins, pdf_rotate_pages, pdf_scale_content
-from app.fixes.pptx import adjust_pptx_font_size, set_pptx_slide_size
+from app.fixes.pdf_fallback import (
+    pdf_crop_margins,
+    pdf_embed_fonts,
+    pdf_normalize_page_sizes,
+    pdf_rotate_pages,
+    pdf_scale_content,
+)
+from app.fixes.pptx import (
+    adjust_pptx_font_size,
+    replace_pptx_font,
+    reposition_pptx_shapes,
+    resize_pptx_text_boxes,
+    set_pptx_slide_size,
+)
 from app.fixes.tables import auto_fit_tables, resize_table_text
-from app.fixes.typography import adjust_font_size, replace_font
-from app.fixes.xlsx import auto_fit_xlsx_columns, set_xlsx_margins, set_xlsx_page_setup
+from app.fixes.typography import (
+    adjust_font_size,
+    normalize_paragraph_spacing,
+    replace_font,
+    set_line_spacing,
+    set_widow_orphan_control,
+)
+from app.fixes.xlsx import (
+    adjust_xlsx_font_size,
+    auto_fit_xlsx_columns,
+    replace_xlsx_font,
+    scale_xlsx_row_heights,
+    set_xlsx_margins,
+    set_xlsx_page_setup,
+    set_xlsx_print_area,
+)
 from app.schema.fix import FixResult
 from app.schema.orchestration import FixAction
 from app.worker.job_state import JobStateManager
@@ -48,10 +75,21 @@ TOOL_REGISTRY: dict[str, tuple[FixFunc, bool]] = {
     "resize_table_text": (resize_table_text, False),
     "fix_page_breaks": (fix_page_breaks, False),
     "remove_manual_breaks": (remove_manual_breaks, False),
+    # DOCX cleanup
+    "accept_tracked_changes": (accept_tracked_changes, False),
+    "strip_hidden_text": (strip_hidden_text, False),
+    "remove_empty_paragraphs": (remove_empty_paragraphs, False),
+    "normalize_styles": (normalize_styles, False),
+    # DOCX typography & spacing
+    "set_widow_orphan_control": (set_widow_orphan_control, False),
+    "normalize_paragraph_spacing": (normalize_paragraph_spacing, False),
+    "set_line_spacing": (set_line_spacing, False),
     # PDF tools
     "pdf_crop_margins": (pdf_crop_margins, True),
     "pdf_scale_content": (pdf_scale_content, True),
     "pdf_rotate_pages": (pdf_rotate_pages, True),
+    "pdf_normalize_page_sizes": (pdf_normalize_page_sizes, True),
+    "pdf_embed_fonts": (pdf_embed_fonts, True),
     # Image tools (PDF-level)
     "convert_colorspace": (convert_pdf_colorspace, True),
     "check_image_dpi": (check_image_dpi, True),
@@ -59,11 +97,18 @@ TOOL_REGISTRY: dict[str, tuple[FixFunc, bool]] = {
     "set_xlsx_margins": (set_xlsx_margins, False),
     "set_xlsx_page_setup": (set_xlsx_page_setup, False),
     "auto_fit_xlsx_columns": (auto_fit_xlsx_columns, False),
+    "adjust_xlsx_font_size": (adjust_xlsx_font_size, False),
+    "replace_xlsx_font": (replace_xlsx_font, False),
+    "set_xlsx_print_area": (set_xlsx_print_area, False),
+    "scale_xlsx_row_heights": (scale_xlsx_row_heights, False),
     # DOCX image tools
     "resize_images_to_fit": (resize_images_to_fit, False),
     # PPTX tools
     "set_pptx_slide_size": (set_pptx_slide_size, False),
     "adjust_pptx_font_size": (adjust_pptx_font_size, False),
+    "reposition_pptx_shapes": (reposition_pptx_shapes, False),
+    "replace_pptx_font": (replace_pptx_font, False),
+    "resize_pptx_text_boxes": (resize_pptx_text_boxes, False),
 }
 
 
