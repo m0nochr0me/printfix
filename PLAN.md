@@ -420,43 +420,43 @@ Close diagnosis-to-fix gaps identified by coverage audit. Prioritized by impact 
 
 #### 9a — DOCX Document Cleanup
 
-- [ ] `accept_tracked_changes(doc)` — Accept all tracked changes (unwrap `w:ins`, remove `w:del` elements). Resolves `tracked_changes` issue type. Tracked changes cause rendering artifacts, phantom spacing, and unexpected content in printed output.
-- [ ] `strip_hidden_text(doc)` — Remove text runs marked with `w:vanish`. Resolves `hidden_content` issue type. Hidden text can cause phantom page breaks and vertical spacing anomalies.
-- [ ] `remove_empty_paragraphs(doc, max_consecutive)` — Collapse runs of empty paragraphs down to at most `max_consecutive` (default 1). Finer-grained than `remove_blank_pages`; recovers wasted vertical space without removing real page breaks.
+- [x] `accept_tracked_changes(doc)` — Accept all tracked changes (unwrap `w:ins`, remove `w:del` elements). Resolves `tracked_changes` issue type. Tracked changes cause rendering artifacts, phantom spacing, and unexpected content in printed output.
+- [x] `strip_hidden_text(doc)` — Remove text runs marked with `w:vanish`. Resolves `hidden_content` issue type. Hidden text can cause phantom page breaks and vertical spacing anomalies.
+- [x] `remove_empty_paragraphs(doc, max_consecutive)` — Collapse runs of empty paragraphs down to at most `max_consecutive` (default 1). Finer-grained than `remove_blank_pages`; recovers wasted vertical space without removing real page breaks.
 
 #### 9b — DOCX Typography & Spacing
 
-- [ ] `set_widow_orphan_control(doc, enable)` — Set `widowControl` paragraph property on all paragraphs. Resolves `orphan_widow` issue type (diagnosed visually, currently unfixable). When enabled, Word prevents single lines at top/bottom of pages.
-- [ ] `normalize_paragraph_spacing(doc, before_pt, after_pt)` — Standardize `spaceAfter` / `spaceBefore` on body paragraphs to consistent values. Addresses `visual_inconsistency` (erratic spacing). Optionally target specific styles.
-- [ ] `set_line_spacing(doc, spacing, rule)` — Force consistent line spacing (single / 1.15 / 1.5 / double) across paragraphs. Addresses `visual_inconsistency` and can recover vertical space when pages are tight.
+- [x] `set_widow_orphan_control(doc, enable)` — Set `widowControl` paragraph property on all paragraphs. Resolves `orphan_widow` issue type (diagnosed visually, currently unfixable). When enabled, Word prevents single lines at top/bottom of pages.
+- [x] `normalize_paragraph_spacing(doc, before_pt, after_pt)` — Standardize `spaceAfter` / `spaceBefore` on body paragraphs to consistent values. Addresses `visual_inconsistency` (erratic spacing). Optionally target specific styles.
+- [x] `set_line_spacing(doc, spacing, rule)` — Force consistent line spacing (single / 1.15 / 1.5 / double) across paragraphs. Addresses `visual_inconsistency` and can recover vertical space when pages are tight.
 
 #### 9c — XLSX Fixes
 
-- [ ] `adjust_xlsx_font_size(sheet, min_size_pt, max_size_pt)` — Clamp cell font sizes to a min/max range. Resolves `small_font` diagnosed for XLSX (currently only fixable in DOCX).
-- [ ] `replace_xlsx_font(sheet, from_font, to_font)` — Replace fonts across all cells in a workbook. Resolves `non_embedded_font` for XLSX.
-- [ ] `set_xlsx_print_area(sheet, area)` — Set print area on sheets that lack one (auto-detect used range if `area` is omitted). Resolves `no_print_area` issue type.
-- [ ] `scale_xlsx_row_heights(sheet, auto_fit)` — Auto-fit row heights to cell content. Complements `auto_fit_xlsx_columns` — currently columns are handled but rows are not, causing clipped cell text in print.
+- [x] `adjust_xlsx_font_size(sheet, min_size_pt, max_size_pt)` — Clamp cell font sizes to a min/max range. Resolves `small_font` diagnosed for XLSX (currently only fixable in DOCX).
+- [x] `replace_xlsx_font(sheet, from_font, to_font)` — Replace fonts across all cells in a workbook. Resolves `non_embedded_font` for XLSX.
+- [x] `set_xlsx_print_area(sheet, area)` — Set print area on sheets that lack one (auto-detect used range if `area` is omitted). Resolves `no_print_area` issue type.
+- [x] `scale_xlsx_row_heights(sheet, auto_fit)` — Auto-fit row heights to cell content. Complements `auto_fit_xlsx_columns` — currently columns are handled but rows are not, causing clipped cell text in print.
 
 #### 9d — PPTX Fixes
 
-- [ ] `reposition_pptx_shapes(doc, margin_inches)` — Move shapes/text boxes that extend beyond the printable area back inside slide bounds (shift inward, preserving relative layout). Resolves `text_outside_printable` — PPTX-specific issue with zero fix capability today.
-- [ ] `replace_pptx_font(doc, from_font, to_font)` — Replace fonts across all text frames and table cells in a presentation. Resolves `non_embedded_font` for PPTX.
-- [ ] `resize_pptx_text_boxes(doc, strategy)` — Enlarge text boxes that are too small for their content, or enable auto-shrink. Strategy: `grow` (expand box) or `shrink_text` (enable auto-size). More nuanced than `adjust_pptx_font_size` alone.
+- [x] `reposition_pptx_shapes(doc, margin_inches)` — Move shapes/text boxes that extend beyond the printable area back inside slide bounds (shift inward, preserving relative layout). Resolves `text_outside_printable` — PPTX-specific issue with zero fix capability today.
+- [x] `replace_pptx_font(doc, from_font, to_font)` — Replace fonts across all text frames and table cells in a presentation. Resolves `non_embedded_font` for PPTX.
+- [x] `resize_pptx_text_boxes(doc, strategy)` — Enlarge text boxes that are too small for their content, or enable auto-shrink. Strategy: `grow` (expand box) or `shrink_text` (enable auto-size). More nuanced than `adjust_pptx_font_size` alone.
 
 #### 9e — PDF Enhancements
 
-- [ ] `pdf_normalize_page_sizes(pdf, target_width, target_height)` — Make all pages the same size (e.g., A4) by adjusting MediaBox and scaling content proportionally. Resolves `page_size_mismatch` for PDFs (currently only fixable in DOCX). Achievable with pikepdf.
-- [ ] `pdf_embed_fonts(pdf)` — Subset-embed non-embedded fonts using fonttools/pikepdf. Resolves `non_embedded_font` at critical severity for PDFs. Technically complex — may require font file resolution and subsetting.
+- [x] `pdf_normalize_page_sizes(pdf, target_width, target_height)` — Make all pages the same size (e.g., A4) by adjusting MediaBox and scaling content proportionally. Resolves `page_size_mismatch` for PDFs (currently only fixable in DOCX). Achievable with pikepdf.
+- [x] `pdf_embed_fonts(pdf)` — Subset-embed non-embedded fonts using fonttools/pikepdf. Resolves `non_embedded_font` at critical severity for PDFs. Technically complex — may require font file resolution and subsetting.
 
 #### 9f — Planner & Diagnosis Wiring
 
-- [ ] Add new tools to `TOOL_REGISTRY` in `executor.py`
+- [x] Add new tools to `TOOL_REGISTRY` in `executor.py`
 - [ ] Add issue type → tool mappings in `planner.py` (`_DOCX_ISSUE_MAP`, `_XLSX_ISSUE_MAP`, `_PDF_ISSUE_MAP`, and new `_PPTX_ISSUE_MAP`)
-- [ ] Add new tools to `fix_planning.yaml.j2` prompt (available_fix_tools section)
-- [ ] Add MCP tool wrappers in `context/printfix.py`
-- [ ] Wire `bad_page_break` issue type into DOCX structural analysis or remove dead enum value
-- [ ] Reclassify `check_image_dpi` as diagnostic-only (remove from fix plans, surface as advisory)
+- [x] Add new tools to `fix_planning.yaml.j2` prompt (available_fix_tools section)
+- [x] Add MCP tool wrappers in `context/printfix.py`
+- [x] Wire `bad_page_break` issue type into DOCX structural analysis or remove dead enum value
+- [x] Reclassify `check_image_dpi` as diagnostic-only (remove from fix plans, surface as advisory)
 
 #### 9g — Visual Consistency (AI-Assisted)
 
-- [ ] `normalize_styles(doc, target_body_font, target_body_size_pt)` — Force body-text paragraphs to a consistent style (font family, size, line spacing) while preserving heading hierarchy. Addresses `visual_inconsistency` for documents with chaotic formatting from copy-paste. Requires style detection heuristics to distinguish headings from body text.
+- [x] `normalize_styles(doc, target_body_font, target_body_size_pt)` — Force body-text paragraphs to a consistent style (font family, size, line spacing) while preserving heading hierarchy. Addresses `visual_inconsistency` for documents with chaotic formatting from copy-paste. Requires style detection heuristics to distinguish headings from body text.
