@@ -451,7 +451,7 @@ Close diagnosis-to-fix gaps identified by coverage audit. Prioritized by impact 
 #### 9f — Planner & Diagnosis Wiring
 
 - [x] Add new tools to `TOOL_REGISTRY` in `executor.py`
-- [ ] Add issue type → tool mappings in `planner.py` (`_DOCX_ISSUE_MAP`, `_XLSX_ISSUE_MAP`, `_PDF_ISSUE_MAP`, and new `_PPTX_ISSUE_MAP`)
+- [x] Add issue type → tool mappings in `planner.py` (`_DOCX_ISSUE_MAP`, `_XLSX_ISSUE_MAP`, `_PDF_ISSUE_MAP`, and new `_PPTX_ISSUE_MAP`)
 - [x] Add new tools to `fix_planning.yaml.j2` prompt (available_fix_tools section)
 - [x] Add MCP tool wrappers in `context/printfix.py`
 - [x] Wire `bad_page_break` issue type into DOCX structural analysis or remove dead enum value
