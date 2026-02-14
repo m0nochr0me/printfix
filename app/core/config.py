@@ -36,7 +36,6 @@ class Settings(BaseSettings):
     CACHE_TTL: int = 3600
     CACHE_TTL_LONG: int = 7 * 24 * 3600  # 7 days
 
-    VECTOR_STORE_PATH: str = ".lancedb"
     STORAGE_DIR: str = "./data"
     MAX_UPLOAD_SIZE_MB: int = 100
     ALLOWED_EXTENSIONS: list[str] = [
