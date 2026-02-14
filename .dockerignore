@@ -4,12 +4,17 @@
 *.ipynb
 *.pyc
 *.pyo
+*.egg-info
+*mcp.json
 
 .claude
 .github/
-*mcp.
-
 .venv/
 .lancedb/
+.ruff_cache/
 __pycache__/
+
 scratch/
+build/
+dist/
+wheels/
